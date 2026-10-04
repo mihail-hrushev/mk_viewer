@@ -1,6 +1,6 @@
 /**
- * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre, the model
- * tree panel it opens, and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
+ * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre, the movable
+ * panels it opens (model tree, models), and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
  *
  *   const ui = createViewerUi(viewer);
  *   ui.addButton({ label: 'Section', title: 'Toggle section plane', onClick: () => ... });
@@ -8,6 +8,7 @@
 import type { ViewerApi } from '../types';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { HierarchyPanel } from './HierarchyPanel';
+import { ModelsPanel } from './ModelsPanel';
 import { ensureStyles } from './styles';
 
 export interface ToolbarButton {
@@ -22,6 +23,8 @@ export interface ViewerUi {
   readonly element: HTMLElement;
   readonly toolbar: HTMLElement;
   readonly hierarchy: HierarchyPanel;
+  /** Models panel: open files, running loads, per-model show / hide / fit / isolate / unload. */
+  readonly models: ModelsPanel;
   /** Right-click menu of the canvas (Hide selected, Hide unselected, Show all). */
   readonly menu: ContextMenu;
   /** Appends a button to the toolbar and returns it. */
@@ -83,6 +86,16 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       return hierarchy.isOpen;
     },
   });
+  let modelsButton: HTMLButtonElement | null = null;
+  const models = new ModelsPanel(viewer, overlay, (open) => modelsButton?.classList.toggle('mkv-on', open));
+  modelsButton = addButton({
+    label: 'Models',
+    title: 'Open, show / hide and unload models',
+    onClick: () => {
+      models.toggle();
+      return models.isOpen;
+    },
+  });
   addButton({ label: 'Fit', title: 'Fit everything in view', onClick: () => viewer.fitToView(undefined, true) });
   addButton({
     label: 'Show all',
@@ -111,6 +124,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     element: overlay,
     toolbar,
     hierarchy,
+    models,
     menu,
     addButton,
     addMenuItem: (item) => menu.addItem(item),
@@ -119,6 +133,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       win?.removeEventListener('resize', place);
       win?.removeEventListener('scroll', place, true);
       menu.dispose();
+      models.dispose();
       hierarchy.dispose();
       overlay.remove();
     },

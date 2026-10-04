@@ -7,37 +7,18 @@
     <title>mk-viewer: models</title>
     <link rel="stylesheet" href="./shared.css" />
     <style>
-      body.drag canvas {
-        outline: 4px dashed #8ab4f8;
-        outline-offset: -4px;
-      }
-      #models .row span {
-        flex: 1 1 140px;
-        overflow-wrap: anywhere;
-      }
-      progress {
-        flex: 1;
-        min-width: 60px;
-      }
-      #picked {
+      .picked {
         white-space: pre-wrap;
         color: #fdd663;
+      }
+      .picked:empty {
+        display: none;
       }
     </style>
   </head>
   <body>
+    <!-- all UI on this page is the viewer's built-in one (createViewerUi): toolbar and mkv panels -->
     <canvas id="c"></canvas>
-    <div class="panel">
-      <h1><a href="./index.html">mk-viewer</a> / models</h1>
-      <p>Open or drop glTF / GLB / OBJ files (several at once to federate them).</p>
-      <div class="row"><input id="file" type="file" multiple accept=".glb,.gltf,.obj,.bin" /></div>
-      <div id="loads"></div>
-      <div id="models"></div>
-      <div id="picked"></div>
-      <div id="selection" class="row"></div>
-      <div id="stats" class="stats"></div>
-      <div id="errors" class="errors"></div>
-    </div>
     <script type="module" src="./models.ts"></script>
   </body>
 </html>

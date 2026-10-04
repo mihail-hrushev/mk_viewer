@@ -1,4 +1,4 @@
-/** Styles of the optional viewer UI (toolbar, hierarchy panel), injected once per document. */
+/** Styles of the optional viewer UI (toolbar, panels, menu), injected once per document. */
 const STYLE_ID = 'mkv-ui-style';
 
 const CSS = `
@@ -12,12 +12,29 @@ const CSS = `
 .mkv-btn:hover{background:#3c4043}
 .mkv-btn:active{background:#4a4e53}
 .mkv-btn.mkv-on{background:#1a73e8}
-.mkv-panel{position:absolute;right:8px;top:8px;bottom:68px;width:min(340px,calc(100% - 16px));display:flex;flex-direction:column;
+.mkv-panel{position:absolute;top:8px;width:min(340px,calc(100% - 16px));display:flex;flex-direction:column;
   pointer-events:auto;touch-action:manipulation;background:rgba(20,22,26,.9);border:1px solid #3c4043;border-radius:8px;overflow:hidden;
   -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
 .mkv-panel[hidden]{display:none}
+.mkv-panel.mkv-dock-right{right:8px}
+.mkv-panel.mkv-dock-left{left:8px}
+.mkv-panel:not(.mkv-auto){bottom:68px}
+.mkv-panel.mkv-auto{max-height:calc(100% - 76px)}
 .mkv-panel-head{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;font-weight:600;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
 .mkv-panel-head span{flex:1}
+.mkv-panel-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.mkv-panel-body.mkv-pad{padding:0 10px 10px;overflow:auto;gap:6px}
+.mkv-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mkv-grow{flex:1 1 120px;overflow-wrap:anywhere}
+.mkv-dim{color:#9aa0a6;font-size:12px}
+.mkv-btn.mkv-outline{border-color:#5f6368;background:#303338}
+.mkv-btn.mkv-outline:hover{background:#3c4043}
+.mkv-model-item{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-top:1px solid #3c4043}
+.mkv-panel input[type=checkbox]{width:18px;height:18px;margin:0}
+.mkv-panel progress{flex:1;min-width:60px}
+.mkv-errors{color:#ff8a80;white-space:pre-wrap}
+.mkv-errors:empty,.mkv-footer:empty{display:none}
+.mkv-footer{border-top:1px solid #3c4043;padding-top:6px;display:flex;flex-direction:column;gap:6px}
 .mkv-search{margin:0 8px 4px;display:flex;gap:6px;align-items:center}
 .mkv-search input{flex:1;min-width:0;font:inherit;color:inherit;min-height:32px;padding:4px 8px;border:1px solid #5f6368;border-radius:6px;background:#202124;outline:none}
 .mkv-search input:focus{border-color:#8ab4f8}

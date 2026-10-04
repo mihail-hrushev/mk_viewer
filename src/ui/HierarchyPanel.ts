@@ -6,6 +6,7 @@
  */
 import type { ViewerApi } from '../types';
 import type { Model } from '../loaders/types';
+import { Panel } from './Panel';
 import { TreeModel, type TreeSource } from './TreeModel';
 
 const ROW_HEIGHT = 26;
@@ -15,7 +16,6 @@ const FILTER_DELAY_MS = 150;
 const OVERSCAN = 6;
 
 export class HierarchyPanel {
-  readonly element: HTMLElement;
   readonly tree = new TreeModel();
 
   private readonly viewer: ViewerApi;
@@ -31,43 +31,13 @@ export class HierarchyPanel {
   private selecting = false;
   private filterTimer = 0;
   private drawQueued = false;
-  private onToggle: ((open: boolean) => void) | undefined;
+  private readonly panel: Panel;
   private readonly resizeObserver: ResizeObserver;
-  /** Pointer dragging the header, or -1. */
-  private dragPointer = -1;
-  /** Pointer position inside the panel when the drag started. */
-  private grabX = 0;
-  private grabY = 0;
-  /** True once the user has moved the panel (it is then positioned by left/top). */
-  private moved = false;
 
   constructor(viewer: ViewerApi, parent: HTMLElement, onToggle?: (open: boolean) => void) {
     this.viewer = viewer;
-    this.onToggle = onToggle;
     const doc = parent.ownerDocument;
-
-    const el = (this.element = doc.createElement('div'));
-    el.className = 'mkv-panel';
-    el.hidden = true;
-
-    const head = doc.createElement('div');
-    head.className = 'mkv-panel-head';
-    const title = doc.createElement('span');
-    title.textContent = 'Model tree';
-    const close = doc.createElement('button');
-    close.className = 'mkv-btn';
-    close.textContent = '✕';
-    close.title = 'Close';
-    close.onclick = () => this.close();
-    head.append(title, close);
-    head.title = 'Drag to move';
-    head.addEventListener('pointerdown', (e) => this.startDrag(e, head));
-    head.addEventListener('pointermove', (e) => this.drag(e));
-    head.addEventListener('pointerup', (e) => this.endDrag(e, head));
-    head.addEventListener('pointercancel', (e) => this.endDrag(e, head));
-    // a moved panel must stay reachable when the canvas shrinks
-    this.resizeObserver = new ResizeObserver(() => this.clampPosition());
-    this.resizeObserver.observe(parent);
+    this.panel = new Panel(parent, { title: 'Model tree', dock: 'right', onToggle });
 
     const search = doc.createElement('div');
     search.className = 'mkv-search';
@@ -91,8 +61,10 @@ export class HierarchyPanel {
     this.scroller.addEventListener('scroll', () => this.queueDraw(), { passive: true });
     this.scroller.addEventListener('click', (e) => this.onClick(e));
 
-    el.append(head, search, this.scroller);
-    parent.append(el);
+    this.panel.body.append(search, this.scroller);
+    // redraw the visible rows whenever the list area changes size (panel opened, canvas resized)
+    this.resizeObserver = new ResizeObserver(() => this.queueDraw());
+    this.resizeObserver.observe(this.scroller);
 
     this.unsubscribe.push(
       viewer.on('modelLoaded', () => this.syncModels()),
@@ -102,94 +74,31 @@ export class HierarchyPanel {
     this.syncModels();
   }
 
+  get element(): HTMLElement {
+    return this.panel.element;
+  }
+
   get isOpen(): boolean {
-    return !this.element.hidden;
+    return this.panel.isOpen;
   }
 
   open(): void {
-    if (this.isOpen) return;
-    this.element.hidden = false;
-    this.clampPosition();
-    this.onToggle?.(true);
-    this.draw();
+    this.panel.open();
   }
 
   close(): void {
-    if (!this.isOpen) return;
-    this.element.hidden = true;
-    this.onToggle?.(false);
+    this.panel.close();
   }
 
   toggle(): void {
-    if (this.isOpen) this.close();
-    else this.open();
+    this.panel.toggle();
   }
 
   dispose(): void {
     clearTimeout(this.filterTimer);
     for (const off of this.unsubscribe) off();
     this.resizeObserver.disconnect();
-    this.element.remove();
-  }
-
-  // --- moving the panel by its header ------------------------------------------------------------
-
-  private startDrag(e: PointerEvent, head: HTMLElement): void {
-    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
-    const parent = this.element.parentElement;
-    if (!parent) return;
-    const p = parent.getBoundingClientRect();
-    const r = this.element.getBoundingClientRect();
-    if (!this.moved) {
-      // switch from the default right/bottom anchoring to an explicit rectangle
-      const s = this.element.style;
-      s.left = `${r.left - p.left}px`;
-      s.top = `${r.top - p.top}px`;
-      s.height = `${r.height}px`;
-      s.right = s.bottom = 'auto';
-      this.moved = true;
-    }
-    this.dragPointer = e.pointerId;
-    this.grabX = e.clientX - r.left;
-    this.grabY = e.clientY - r.top;
-    head.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  }
-
-  private drag(e: PointerEvent): void {
-    if (e.pointerId !== this.dragPointer) return;
-    const parent = this.element.parentElement;
-    if (!parent) return;
-    const p = parent.getBoundingClientRect();
-    this.place(e.clientX - this.grabX - p.left, e.clientY - this.grabY - p.top);
-  }
-
-  private endDrag(e: PointerEvent, head: HTMLElement): void {
-    if (e.pointerId !== this.dragPointer) return;
-    this.dragPointer = -1;
-    if (head.hasPointerCapture(e.pointerId)) head.releasePointerCapture(e.pointerId);
-  }
-
-  /** Positions the panel at (left, top) inside its parent, keeping it fully inside. */
-  private place(left: number, top: number): void {
-    const parent = this.element.parentElement;
-    if (!parent) return;
-    const el = this.element;
-    const maxLeft = Math.max(0, parent.clientWidth - el.offsetWidth);
-    const maxTop = Math.max(0, parent.clientHeight - el.offsetHeight);
-    el.style.left = `${Math.min(Math.max(0, left), maxLeft)}px`;
-    el.style.top = `${Math.min(Math.max(0, top), maxTop)}px`;
-  }
-
-  private clampPosition(): void {
-    if (!this.moved || !this.isOpen) return;
-    const parent = this.element.parentElement;
-    if (!parent) return;
-    const el = this.element;
-    // never taller than the canvas
-    if (el.offsetHeight > parent.clientHeight) el.style.height = `${parent.clientHeight}px`;
-    this.place(el.offsetLeft, el.offsetTop);
-    this.queueDraw();
+    this.panel.dispose();
   }
 
   // ---------------------------------------------------------------------------------------------
