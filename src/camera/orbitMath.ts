@@ -47,9 +47,12 @@ export function orbit(camera: Camera, dYaw: number, dPitch: number, worldUp: Rea
     vec3.rotateAxis(sUp, sUp, worldUp, dYaw);
   }
 
+  vec3.sub(sFwd, sTarget, sEye);
+  vec3.normalize(sFwd, sFwd);
+  // a turntable camera never rolls: the pitch axis is always horizontal
+  levelRight(sRight, sFwd, sUp, worldUp);
+
   if (dPitch !== 0) {
-    vec3.sub(sFwd, sTarget, sEye);
-    vec3.normalize(sFwd, sFwd);
     // polar angle of the forward vector measured from world up (0 = looking straight up)
     const polar = Math.acos(Math.max(-1, Math.min(1, vec3.dot(sFwd, worldUp))));
     let newPolar = polar + dPitch;
@@ -59,16 +62,42 @@ export function orbit(camera: Camera, dYaw: number, dPitch: number, worldUp: Rea
     if (dPitch < 0 && newPolar > polar) newPolar = polar;
     const a = newPolar - polar;
     if (a !== 0) {
-      vec3.cross(sRight, sFwd, sUp);
-      if (vec3.lengthSq(sRight) < 1e-24) vec3.anyPerpendicular(sRight, sFwd);
-      vec3.normalize(sRight, sRight);
       // rotating by -a around right = forward moves away from up by a
       rotateAround(sEye, p, sRight, -a);
       rotateAround(sTarget, p, sRight, -a);
-      vec3.rotateAxis(sUp, sUp, sRight, -a);
+      vec3.rotateAxis(sFwd, sFwd, sRight, -a);
     }
   }
+  vec3.cross(sUp, sRight, sFwd);
+  vec3.normalize(sUp, sUp);
   camera.set(sEye, sTarget, sUp);
+}
+
+/**
+ * Removes any roll from the camera: its up vector is replaced by the one that keeps the horizon
+ * level for the current view direction. At an exact top/bottom view the heading given by the
+ * current up vector is kept.
+ */
+export function levelCamera(camera: Camera, worldUp: ReadArray): void {
+  vec3.sub(sFwd, camera.target, camera.eye);
+  if (vec3.lengthSq(sFwd) === 0) return;
+  vec3.normalize(sFwd, sFwd);
+  levelRight(sRight, sFwd, camera.up, worldUp);
+  vec3.cross(sUp, sRight, sFwd);
+  vec3.normalize(sUp, sUp);
+  if (!vec3.equals(sUp, camera.up)) camera.set(null, null, sUp);
+}
+
+/** Unit right vector perpendicular to both `fwd` and `worldUp` (horizontal, upright camera). */
+function levelRight(out: Float64Array, fwd: ReadArray, up: ReadArray, worldUp: ReadArray): void {
+  vec3.cross(out, fwd, worldUp);
+  if (vec3.lengthSq(out) < 1e-12) {
+    // looking straight along the up axis: take the heading from the current up vector
+    vec3.cross(out, fwd, up);
+    vec3.scaleAndAdd(out, out, worldUp, -vec3.dot(out, worldUp));
+    if (vec3.lengthSq(out) < 1e-24) vec3.anyPerpendicular(out, worldUp);
+  }
+  vec3.normalize(out, out);
 }
 
 function rotateAround(point: Float64Array, pivot: ReadArray, axis: ReadArray, angle: number): void {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Camera } from './Camera';
-import { CameraTransition, orbit, pan, zoomAt, worldUpVector, POLE_EPSILON } from './orbitMath';
+import { CameraTransition, levelCamera, orbit, pan, zoomAt, worldUpVector, POLE_EPSILON } from './orbitMath';
 import * as mat4 from '../math/mat4';
 import * as vec3 from '../math/vec3';
 import * as frustum from '../math/frustum';
@@ -207,6 +207,33 @@ describe('orbit math', () => {
     orbit(top, 0, -0.3, worldUpVector('z'));
     const f2 = top.getForward(vec3.create());
     expect(Math.acos(-f2[2])).toBeCloseTo(0.3, 6);
+  });
+
+  it('never rolls: the horizon stays level after retargeting and orbiting', () => {
+    const up = worldUpVector('z');
+    const right = vec3.create();
+    const rollOf = (c: Camera) => Math.abs(vec3.dot(c.getRight(right), up));
+
+    const cam = new Camera({ up: 'z' });
+    cam.set([20, -15, 9], [0, 0, 0], [0, 0, 1]);
+    cam.update();
+    // retarget keeping the old up vector (what a pivot change does): this view is rolled
+    cam.set(null, [7, 4, -3], cam.getUpOrtho(vec3.create()));
+    expect(rollOf(cam)).toBeGreaterThan(1e-3);
+    levelCamera(cam, up);
+    expect(rollOf(cam)).toBeLessThan(1e-12);
+
+    // orbiting a rolled camera levels it and keeps it level
+    cam.set(null, [-5, 2, 6], null);
+    for (let i = 0; i < 500; i++) orbit(cam, 0.013 * ((i % 7) - 3), 0.009 * ((i % 5) - 2), up);
+    expect(rollOf(cam)).toBeLessThan(1e-12);
+    expect(vec3.dot(cam.getUpOrtho(vec3.create()), up)).toBeGreaterThan(0);
+
+    // an exact top view keeps its heading
+    const top = new Camera({ up: 'z' });
+    top.set([0, 0, 10], [0, 0, 0], [0, 1, 0]);
+    levelCamera(top, up);
+    expect(Array.from(top.up)).toEqual([0, 1, 0]);
   });
 
   it('drag down moves the camera up (positive pitch)', () => {

@@ -18,7 +18,7 @@ import type { ReadArray } from '../math/common';
 import * as aabb from '../math/aabb';
 import * as vec3 from '../math/vec3';
 import type { Camera } from './Camera';
-import { CameraTransition, orbit, pan, twoFingerStep, worldUpVector, zoomAt } from './orbitMath';
+import { CameraTransition, levelCamera, orbit, pan, twoFingerStep, worldUpVector, zoomAt } from './orbitMath';
 import { GestureMode, GestureRecognizer, TapKind, pointerKindOf, type GestureOptions, type GestureSink } from './gestures';
 
 export interface OrbitControlsOptions {
@@ -177,6 +177,7 @@ export class OrbitControls implements GestureSink {
     } else {
       this.transition.cancel();
       this.camera.setState(state);
+      levelCamera(this.camera, this.worldUp);
     }
   }
 
@@ -213,7 +214,10 @@ export class OrbitControls implements GestureSink {
         this.maybeEndInteraction();
       }
     }
-    return this.transition.step(this.camera, dtMs);
+    if (!this.transition.active) return false;
+    const running = this.transition.step(this.camera, dtMs);
+    levelCamera(this.camera, this.worldUp);
+    return running;
   }
 
   dispose(): void {
