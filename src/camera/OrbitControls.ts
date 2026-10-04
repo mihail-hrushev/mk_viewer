@@ -6,8 +6,8 @@
  * wheel zooms toward the cursor, double click sets the pivot through `pickPivot`.
  * Touch: one finger orbits, two fingers pinch-zoom about their midpoint and pan (no twist),
  * double tap sets the pivot. A click / tap (no drag) is reported through `onTap`.
- * Keyboard: W / S fly forward / backward along the view direction, A / D strafe left / right
- * (physical key positions, so any keyboard layout works); Shift moves faster. Keys act while the
+ * Keyboard: W / S fly forward / backward along the view direction, A / D strafe left / right,
+ * E / C move up / down along the world up axis (physical key positions, so any keyboard layout works); Shift moves faster. Keys act while the
  * pointer is over the element or the element has focus, and never while typing in a form field.
  *
  * The element gets `touch-action: none` and no text selection / touch callout, so the browser does
@@ -75,7 +75,7 @@ export interface OrbitControlsOptions {
 
 const WHEEL_IDLE_MS = 150;
 
-const KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8;
+const KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_UP = 16, KEY_DOWN = 32;
 const SHIFT_MOVE_FACTOR = 4;
 /** Longest frame time a key step is integrated over, so a stalled frame cannot jump the camera. */
 const MAX_MOVE_DT_MS = 100;
@@ -86,6 +86,8 @@ function moveKeyBit(code: string): number {
     case 'KeyS': return KEY_BACK;
     case 'KeyA': return KEY_LEFT;
     case 'KeyD': return KEY_RIGHT;
+    case 'KeyE': return KEY_UP;
+    case 'KeyC': return KEY_DOWN;
     default: return 0;
   }
 }
@@ -269,7 +271,8 @@ export class OrbitControls implements GestureSink {
       this.moveFresh = false;
       const forward = ((keys & KEY_FORWARD) !== 0 ? 1 : 0) - ((keys & KEY_BACK) !== 0 ? 1 : 0);
       const right = ((keys & KEY_RIGHT) !== 0 ? 1 : 0) - ((keys & KEY_LEFT) !== 0 ? 1 : 0);
-      fly(this.camera, forward * step, right * step, this.effectiveMinDistance(), this.effectiveMaxDistance());
+      const up = ((keys & KEY_UP) !== 0 ? 1 : 0) - ((keys & KEY_DOWN) !== 0 ? 1 : 0);
+      fly(this.camera, forward * step, right * step, this.effectiveMinDistance(), this.effectiveMaxDistance(), up * step, this.worldUp);
     }
     if (!this.transition.active) return keys !== 0;
     const running = this.transition.step(this.camera, dtMs);

@@ -246,6 +246,12 @@ describe('orbit math', () => {
       expect(cam.target[i]).toBeCloseTo(t0[i] + 3 * f[i] - 2 * r[i], 9);
     }
     expect(cam.distance).toBeCloseTo(d0, 9);
+    // vertical movement follows the world up axis, not the camera's
+    const z0 = cam.eye[2], tz0 = cam.target[2], x0 = cam.eye[0];
+    fly(cam, 0, 0, 0, Infinity, 2.5, worldUpVector('z'));
+    expect(cam.eye[2]).toBeCloseTo(z0 + 2.5, 9);
+    expect(cam.target[2]).toBeCloseTo(tz0 + 2.5, 9);
+    expect(cam.eye[0]).toBeCloseTo(x0, 9);
     // orthographic: forward zooms (view height shrinks), sideways still translates
     const ortho = makeCam(true);
     const h0 = ortho.orthoHeight;

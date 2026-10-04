@@ -359,7 +359,7 @@ The contract, the detection rules and a do/don't list are in
 | hover highlight | move | (none) |
 
 Keyboard: `W` / `S` move the camera forward / backward along the view direction, `A` / `D` shift it
-left / right; hold `Shift` to move four times faster. Speed follows the zoom level (the distance to
+left / right, `E` / `C` move it up / down along the world up axis; hold `Shift` to move four times faster. Speed follows the zoom level (the distance to
 the orbit centre). The keys are read by physical position, so they work on any keyboard layout, and
 only while the pointer is over the canvas or the canvas has focus.
 

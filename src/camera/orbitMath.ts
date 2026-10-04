@@ -174,19 +174,30 @@ export function zoomAt(
  * Fly step: moves eye and target together by `forward` world units along the view direction and
  * `right` units along the camera's right vector. An orthographic view has no depth cue, so there
  * the forward part zooms instead (same on-screen effect as approaching in perspective).
+ * `up` units are applied along `worldUp` (the global up axis, not the camera's).
  */
-export function fly(camera: Camera, forward: number, right: number, minDistance = 0, maxDistance = Infinity): void {
+export function fly(
+  camera: Camera,
+  forward: number,
+  right: number,
+  minDistance = 0,
+  maxDistance = Infinity,
+  up = 0,
+  worldUp: ReadArray = Y_UP,
+): void {
   if (forward !== 0 && camera.orthographic) {
     zoomAt(camera, Math.exp(-forward / Math.max(camera.distance, 1e-300)), 0, 0, minDistance, maxDistance);
     forward = 0;
   }
-  if (forward === 0 && right === 0) return;
+  if (forward === 0 && right === 0 && up === 0) return;
   camera.getForward(sFwd);
   camera.getRight(sRight);
   vec3.scaleAndAdd(sEye, camera.eye, sFwd, forward);
   vec3.scaleAndAdd(sEye, sEye, sRight, right);
+  vec3.scaleAndAdd(sEye, sEye, worldUp, up);
   vec3.scaleAndAdd(sTarget, camera.target, sFwd, forward);
   vec3.scaleAndAdd(sTarget, sTarget, sRight, right);
+  vec3.scaleAndAdd(sTarget, sTarget, worldUp, up);
   camera.set(sEye, sTarget, null);
 }
 
