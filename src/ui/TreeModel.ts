@@ -108,9 +108,14 @@ export class TreeModel {
 
   /** objectIds of the row's node and all nodes below it (a model row gives every object). */
   collectObjectIds(row: number): number[] {
-    const e = this.entries[this.rowModel[row]];
+    return this.collectNodeObjectIds(this.rowModel[row], this.rowNode[row]);
+  }
+
+  /** Same by model index and node (MODEL_ROW for the whole model); the node need not be visible. */
+  collectNodeObjectIds(model: number, n: number): number[] {
+    const e = this.entries[model];
+    if (!e) return [];
     const h = e.source.hierarchy;
-    const n = this.rowNode[row];
     const out: number[] = [];
     const stack: number[] = n === MODEL_ROW ? Array.from(h.roots()) : [n];
     while (stack.length > 0) {

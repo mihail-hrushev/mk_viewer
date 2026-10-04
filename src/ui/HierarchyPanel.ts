@@ -1,7 +1,8 @@
 /**
  * Model tree panel: the original node structure of every loaded model, with a name filter.
  * Clicking a node selects its objects (the node and everything below it) and zooms the camera to
- * them; selecting an object on the canvas reveals its node. Rows are virtualised, so trees with
+ * them; shift / ctrl + click adds further nodes to the selection (or removes them); selecting
+ * objects on the canvas highlights and reveals their nodes. Rows are virtualised, so trees with
  * hundreds of thousands of nodes stay responsive.
  */
 import type { ViewerApi } from '../types';
@@ -14,6 +15,13 @@ const INDENT = 14;
 const FILTER_DELAY_MS = 150;
 /** Rows drawn above and below the visible window. */
 const OVERSCAN = 6;
+/** Canvas selections larger than this are not all highlighted in the tree. */
+const MAX_HIGHLIGHT = 5000;
+const KEY_BASE = 2 ** 32;
+
+function nodeKey(model: number, node: number): number {
+  return model * KEY_BASE + node;
+}
 
 export class HierarchyPanel {
   readonly tree = new TreeModel();
@@ -25,8 +33,8 @@ export class HierarchyPanel {
   private readonly spacer: HTMLElement;
   private readonly sources = new Map<Model, TreeSource>();
   private readonly unsubscribe: (() => void)[] = [];
-  private activeModel = -1;
-  private activeNode = -1;
+  /** Highlighted nodes, as nodeKey(model index, node). */
+  private readonly active = new Set<number>();
   /** True while a selection made from the tree is being applied (do not reveal it again). */
   private selecting = false;
   private filterTimer = 0;
@@ -111,7 +119,7 @@ export class HierarchyPanel {
       list.push(s);
     }
     for (const m of this.sources.keys()) if (!this.viewer.models.includes(m)) this.sources.delete(m);
-    this.activeModel = this.activeNode = -1;
+    this.active.clear(); // model indices shift
     this.tree.setSources(list);
     this.updateCount();
     this.queueDraw();
@@ -142,32 +150,62 @@ export class HierarchyPanel {
       }
       if (!tree.isModelRow(row)) return;
     }
-    this.activeModel = tree.rowModel[row];
-    this.activeNode = tree.rowNode[row];
-    const ids = tree.collectObjectIds(row);
-    if (ids.length > 0) {
-      this.selecting = true;
-      try {
-        // a whole model is framed but not selected: selecting every object would only tint it all
-        this.viewer.select(tree.isModelRow(row) ? [] : ids);
-      } finally {
-        this.selecting = false;
-      }
-      this.viewer.zoomToObjects(ids, true);
+    if (tree.isModelRow(row)) {
+      // a whole model is framed but not selected: selecting every object would only tint it all
+      this.active.clear();
+      this.applySelection([]);
+      const all = tree.collectObjectIds(row);
+      if (all.length > 0) this.viewer.zoomToObjects(all, true);
+      this.draw();
+      return;
     }
+    // shift / ctrl / cmd + click adds the node to the selection, or removes it when already in
+    const key = nodeKey(tree.rowModel[row], tree.rowNode[row]);
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      if (!this.active.delete(key)) this.active.add(key);
+    } else {
+      this.active.clear();
+      this.active.add(key);
+    }
+    // objects of every highlighted node (a node and one of its parents may both be in)
+    const ids = new Set<number>();
+    for (const k of this.active) {
+      for (const id of tree.collectNodeObjectIds(Math.floor(k / KEY_BASE), k % KEY_BASE)) ids.add(id);
+    }
+    const list = Array.from(ids);
+    this.applySelection(list);
+    if (list.length > 0) this.viewer.zoomToObjects(list, true);
     this.draw();
   }
 
-  /** Canvas selection: show the node of the (first) selected object. */
+  private applySelection(ids: number[]): void {
+    this.selecting = true;
+    try {
+      this.viewer.select(ids);
+    } finally {
+      this.selecting = false;
+    }
+  }
+
+  /** Canvas selection: highlight the nodes of the selected objects and show the first one. */
   private onSelection(ids: number[]): void {
-    if (this.selecting || !this.isOpen || ids.length === 0) return;
-    const model = this.viewer.getModelOf(ids[0]);
+    if (this.selecting) return;
+    this.active.clear();
+    const sources = this.tree.sources;
+    for (let i = 0; i < ids.length && i < MAX_HIGHLIGHT; i++) {
+      const model = this.viewer.getModelOf(ids[i]);
+      const source = model && this.sources.get(model);
+      const node = source ? source.hierarchy.nodeOfObject(ids[i]) : -1;
+      if (source && node >= 0) this.active.add(nodeKey(sources.indexOf(source), node));
+    }
+    if (!this.isOpen) return;
+    const model = ids.length > 0 ? this.viewer.getModelOf(ids[0]) : undefined;
     const source = model && this.sources.get(model);
-    if (!source) return;
-    const row = this.tree.reveal(source, ids[0]);
-    if (row < 0) return;
-    this.activeModel = this.tree.rowModel[row];
-    this.activeNode = this.tree.rowNode[row];
+    const row = source ? this.tree.reveal(source, ids[0]) : -1;
+    if (row < 0) {
+      this.draw();
+      return;
+    }
     const top = row * ROW_HEIGHT;
     const view = this.scroller;
     // revealing added rows: grow the scroll range before scrolling into it
@@ -208,7 +246,7 @@ export class HierarchyPanel {
       let cls = 'mkv-row';
       if (tree.isModelRow(r)) cls += ' mkv-model';
       if (tree.isMatch(r)) cls += ' mkv-match';
-      if (tree.rowModel[r] === this.activeModel && tree.rowNode[r] === this.activeNode) cls += ' mkv-active';
+      if (!tree.isModelRow(r) && this.active.has(nodeKey(tree.rowModel[r], tree.rowNode[r]))) cls += ' mkv-active';
       row.className = cls;
       row.dataset.row = String(r);
       row.style.top = `${r * ROW_HEIGHT}px`;

@@ -388,7 +388,9 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   node name (case-insensitive; matches are shown with the path leading to them).
 - Clicking a node selects its objects, including everything below it, and zooms the camera to them
   the same way a double click on an object does. Clicking a model row frames the model.
-- Selecting an object on the canvas reveals and highlights its node in the open tree.
+- Shift + click (or ctrl / cmd + click) on a node adds it to the selection, or removes it when it
+  is already in; the camera then frames everything selected.
+- Selecting objects on the canvas highlights their nodes and reveals the first one in the open tree.
 - **Models** opens the models panel: open files (or drop them on the canvas), follow running loads
   with a cancel button, and show / hide, fit, isolate or unload each model. `ui.models.footer` is an
   empty container for your own content, and `ui.models.showError(text)` reports a failed load.
