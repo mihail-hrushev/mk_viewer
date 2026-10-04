@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mk-viewer gl smoke test</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #222;
+        overflow: hidden;
+        font: 12px/1.4 ui-monospace, Consolas, monospace;
+        color: #eee;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #info {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 4px;
+        white-space: pre;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="info">loading…</div>
+    <script type="module" src="./smoke.ts"></script>
+  </body>
+</html>
