@@ -16,7 +16,7 @@ const CSS = `
   pointer-events:auto;touch-action:manipulation;background:rgba(20,22,26,.9);border:1px solid #3c4043;border-radius:8px;overflow:hidden;
   -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
 .mkv-panel[hidden]{display:none}
-.mkv-panel-head{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;font-weight:600}
+.mkv-panel-head{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;font-weight:600;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
 .mkv-panel-head span{flex:1}
 .mkv-search{margin:0 8px 4px;display:flex;gap:6px;align-items:center}
 .mkv-search input{flex:1;min-width:0;font:inherit;color:inherit;min-height:32px;padding:4px 8px;border:1px solid #5f6368;border-radius:6px;background:#202124;outline:none}
