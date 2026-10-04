@@ -17,14 +17,22 @@ export interface LightingParams {
   keyLightColor: [number, number, number];
   skyColor: [number, number, number];
   groundColor: [number, number, number];
+  /**
+   * Tone contrast: the lit colour is raised to this power before display. 1 = none; above 1
+   * deepens dark and mid tones and leaves full brightness unchanged.
+   */
+  contrast: number;
 }
 
 /** Defaults: light from upper-left-behind the camera, cool sky, warm-dark ground (linear). */
 export const DEFAULT_LIGHTING: LightingParams = {
   keyLightDir: [-0.35, 0.6, 0.72],
-  keyLightColor: [0.95, 0.93, 0.9],
-  skyColor: [0.42, 0.45, 0.5],
-  groundColor: [0.16, 0.15, 0.14],
+  keyLightColor: [1.05, 1.03, 1.0],
+  // Ambient is kept low so surfaces turned away from the key light read clearly darker than lit
+  // ones; raising these flattens the image.
+  skyColor: [0.25, 0.27, 0.31],
+  groundColor: [0.045, 0.045, 0.05],
+  contrast: 1.35,
 };
 
 export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost';
@@ -120,6 +128,7 @@ export class UberProgram {
     this.program.setVec3('u_keyLightColor', p.keyLightColor[0], p.keyLightColor[1], p.keyLightColor[2]);
     this.program.setVec3('u_skyColor', p.skyColor[0], p.skyColor[1], p.skyColor[2]);
     this.program.setVec3('u_groundColor', p.groundColor[0], p.groundColor[1], p.groundColor[2]);
+    this.program.setFloat('u_contrast', p.contrast);
   }
 
   /** Linear rgb + opacity. */

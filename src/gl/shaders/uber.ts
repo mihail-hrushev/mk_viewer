@@ -22,6 +22,7 @@
  *   u_keyLightColor    vec3       linear
  *   u_skyColor         vec3       linear hemisphere colour (up)
  *   u_groundColor      vec3       linear hemisphere colour (down)
+ *   u_contrast         float      tone curve exponent (1 = none, > 1 deepens darks)
  *   u_upView           vec3       world up expressed in view space (mat3(view) * up), unit
  *   u_ghostColor       vec4       linear rgb + opacity
  *   u_sectionPlaneCount int       (SECTION_PLANES variant only)
@@ -140,6 +141,7 @@ uniform vec3 u_keyLightDir;
 uniform vec3 u_keyLightColor;
 uniform vec3 u_skyColor;
 uniform vec3 u_groundColor;
+uniform float u_contrast;
 uniform vec3 u_upView;
 uniform vec4 u_ghostColor;
 #ifdef SECTION_PLANES
@@ -225,7 +227,9 @@ void main() {
   vec3 envSpec = mix(hemisphere(R), 0.5 * (u_skyColor + u_groundColor), rough);
   vec3 ambient = diffuseColor * hemisphere(N) * (1.0 - Fenv) + envSpec * Fenv;
 
-  vec3 color = direct + ambient + base * emissive;
+  // Contrast curve on the lit colour: darks and mids go down, full brightness stays where it is.
+  vec3 lit = pow(min(direct + ambient, vec3(1.0)), vec3(u_contrast));
+  vec3 color = lit + base * emissive;
 
   // Selection / hover tint is not applied here: it is a screen-space overlay composited at present
   // time (COMPOSITE_FS), so changing it never restarts the progressive image.
