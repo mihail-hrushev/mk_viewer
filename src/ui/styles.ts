@@ -31,6 +31,12 @@ const CSS = `
 .mkv-caret{flex:0 0 22px;height:100%;display:flex;align-items:center;justify-content:center;color:#9aa0a6;font-size:10px}
 .mkv-label{overflow:hidden;text-overflow:ellipsis;padding-right:8px}
 .mkv-row.mkv-match .mkv-label{color:#fdd663}
+.mkv-menu{position:absolute;min-width:170px;padding:4px;display:flex;flex-direction:column;pointer-events:auto;touch-action:manipulation;
+  background:rgba(32,33,36,.97);border:1px solid #3c4043;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.mkv-menu[hidden]{display:none}
+.mkv-menu-item{font:inherit;color:inherit;text-align:left;min-height:34px;padding:4px 12px;border:0;border-radius:5px;background:transparent;cursor:pointer;white-space:nowrap}
+.mkv-menu-item:hover:not(:disabled){background:#3c4043}
+.mkv-menu-item:disabled{color:#80868b;cursor:default}
 .mkv-empty{padding:12px;color:#9aa0a6}
 `;
 

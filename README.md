@@ -390,6 +390,10 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   the same way a double click on an object does. Clicking a model row frames the model.
 - Selecting an object on the canvas reveals and highlights its node in the open tree.
 - **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
+- A right click on the canvas (long press on touch) opens a menu with **Hide selected**,
+  **Hide unselected** and **Show all**. Right-clicking an object that is not selected selects it
+  first; a right-button drag still pans. Add your own entries with
+  `ui.addMenuItem({ label, onClick: (selection) => ... })`.
 
 Rows are virtualised, so trees with hundreds of thousands of nodes stay responsive. The styles are
 injected under the `mkv-` class prefix; `ui.dispose()` removes everything.

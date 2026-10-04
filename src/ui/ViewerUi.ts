@@ -1,11 +1,12 @@
 /**
- * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre and the model
- * tree panel it opens. Plain DOM, no dependencies; the viewer itself works without it.
+ * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre, the model
+ * tree panel it opens, and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
  *
  *   const ui = createViewerUi(viewer);
  *   ui.addButton({ label: 'Section', title: 'Toggle section plane', onClick: () => ... });
  */
 import type { ViewerApi } from '../types';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { HierarchyPanel } from './HierarchyPanel';
 import { ensureStyles } from './styles';
 
@@ -21,8 +22,12 @@ export interface ViewerUi {
   readonly element: HTMLElement;
   readonly toolbar: HTMLElement;
   readonly hierarchy: HierarchyPanel;
+  /** Right-click menu of the canvas (Hide selected, Hide unselected, Show all). */
+  readonly menu: ContextMenu;
   /** Appends a button to the toolbar and returns it. */
   addButton(button: ToolbarButton): HTMLButtonElement;
+  /** Appends an item to the right-click menu. */
+  addMenuItem(item: MenuItem): void;
   dispose(): void;
 }
 
@@ -88,15 +93,32 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     },
   });
 
+  const menu = new ContextMenu(viewer, overlay);
+  const hasSelection = (sel: number[]): boolean => sel.length > 0;
+  menu.addItem({
+    label: 'Hide selected',
+    enabled: hasSelection,
+    onClick: (sel) => {
+      viewer.setVisible(sel, false);
+      viewer.select([]);
+    },
+  });
+  // hides everything else and keeps the selection, so it can be refined further
+  menu.addItem({ label: 'Hide unselected', enabled: hasSelection, onClick: (sel) => viewer.isolate(sel, true) });
+  menu.addItem({ label: 'Show all', onClick: () => viewer.showAll() });
+
   return {
     element: overlay,
     toolbar,
     hierarchy,
+    menu,
     addButton,
+    addMenuItem: (item) => menu.addItem(item),
     dispose() {
       observer.disconnect();
       win?.removeEventListener('resize', place);
       win?.removeEventListener('scroll', place, true);
+      menu.dispose();
       hierarchy.dispose();
       overlay.remove();
     },
