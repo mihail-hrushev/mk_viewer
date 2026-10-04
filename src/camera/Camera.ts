@@ -46,6 +46,14 @@ export class Camera {
   private _far = 1000;
   private _autoClip = true;
   private _minNearFarRatio = 1e-5;
+  /**
+   * Optional query: largest view depth of content that is actually visible (not sub-pixel), given
+   * the view-depth row (fz0..fz3) and the pixels-per-unit at distance 1. The near/far ratio limit is
+   * applied to that depth instead of the far plane, so a distant, sub-pixel part of the scene (e.g.
+   * a federated model 1e5 units away) does not push the near plane out and clip close-ups. The far
+   * plane itself still encloses the whole scene.
+   */
+  visibleDepth: ((fz0: number, fz1: number, fz2: number, fz3: number, pixelScale: number) => number) | null = null;
   private readonly _bounds = aabb.create();
   private _version = 1;
   private _dirty = true;
@@ -431,7 +439,12 @@ export class Camera {
       // eye inside the scene bounds: use the target distance as a hint for what matters
       near = dist * 0.05;
     }
-    near = Math.max(near, far * this._minNearFarRatio);
+    let ratioBase = far;
+    if (this.visibleDepth) {
+      const vd = this.visibleDepth(fz0, fz1, fz2, fz3, perspectivePixelFactor(this._fov, this._height));
+      if (vd > 0 && vd < far) ratioBase = Math.max(vd + margin, dist);
+    }
+    near = Math.max(near, ratioBase * this._minNearFarRatio);
     if (near >= far) far = near * 2;
     this._near = near;
     this._far = far;

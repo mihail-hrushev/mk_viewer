@@ -103,9 +103,15 @@ void main() {
   vec4 r1 = texelFetch(u_fragTex, fc + ivec2(1, 0), 0);
   vec4 r2 = texelFetch(u_fragTex, fc + ivec2(2, 0), 0);
 
-  vec4 local = vec4(a_position * t3.xyz + t4.xyz, 1.0);
-  vec4 world = vec4(dot(r0, local), dot(r1, local), dot(r2, local), 1.0);
-  vec4 view = u_viewMatrix * world;
+  // Linear part and translation are taken to view space separately, so the two large terms (the
+  // fragment's translation and the view offset, both ~ distance from the scene origin) cancel once
+  // per fragment instead of per vertex: content far from the origin is then off by at most
+  // ulp(distance) as a rigid shift, instead of every vertex snapping to that grid (wobbly parts).
+  vec3 lp = a_position * t3.xyz + t4.xyz;
+  vec3 lin = vec3(dot(r0.xyz, lp), dot(r1.xyz, lp), dot(r2.xyz, lp));
+  mat3 v3 = mat3(u_viewMatrix);
+  vec3 tView = v3 * vec3(r0.w, r1.w, r2.w) + u_viewMatrix[3].xyz;
+  vec4 view = vec4(v3 * lin + tView, 1.0);
   gl_Position = u_projMatrix * view;
 
   // Normal: cofactor of the 3x3 (= det * inverse-transpose), correct under non-uniform scale.

@@ -22,6 +22,18 @@
  * - Picking (`pick`, hover, click selection) reads the GPU id buffer of the image on screen, so it
  *   reflects what is drawn: while a heavy image is still being refined, small objects not drawn yet
  *   are not pickable.
+ * - Models: `load()` runs a loader plugin (registered explicitly: `ViewerOptions.loaders`,
+ *   `registerLoader`, or the shared `defaultRegistry`). Several loads may run concurrently; they share
+ *   one round-robin time-slicing scheduler and appear progressively. Loaded models are listed in
+ *   `models`; each owns disjoint objectId ranges (`getModelOf` is a binary search over them) and can
+ *   be hidden, isolated, framed, re-placed (`model.setTransform`) and unloaded on its own.
+ * - Handles: geometry and material ids are recycled after release (once no mesh uses them).
+ * - Precision: the float64 scene origin is fixed by the first mesh (until `clear()`). Mesh placements
+ *   are stored as float32 relative to it, so a mesh at distance d from the origin is shifted rigidly
+ *   by up to ulp(d) / 2 (the shader cancels the large terms per mesh, so shapes do not deform):
+ *   <= 1 mm up to d = 1.6e4, 4 mm at 1e5, 16 mm at 5e5, 31 mm at 1e6 units. Federated models should
+ *   therefore lie within ~1e5 units of each other (they may all be ~1e7 from world 0). The near plane
+ *   follows visible content, so a far-away model does not clip close-ups of another.
  */
 import type {
   CameraState,
@@ -37,18 +49,25 @@ import type {
   PickResult,
   Primitives,
   SectionPlane,
+  ObjectSelection,
   ViewerApi,
   ViewerEvents,
+  ViewerLoadOptions,
   ViewerOptions,
   ViewerStats,
 } from './types';
+import type { LoaderInput, LoaderPlugin, LoadTask, Model } from './loaders/types';
+import type { LoadContextImpl, ModelImpl } from './loaders/context';
+import { loadModel } from './loaders/loadModel';
+import { defaultRegistry, LoaderRegistry } from './loaders/registry';
+import { DEFAULT_OBJECT_ID_BASE } from './loaders/objectIds';
 import { FRAG_TEX_WIDTH, FragFlags, MAX_SECTION_PLANES } from './layout';
 import { Scene } from './core';
 import { GlContext, planeFromNormalPoint } from './gl';
 import { Camera, CameraTransition, OrbitControls } from './camera';
 import * as prim from './primitives';
 import { Renderer, type RenderHost } from './render/Renderer';
-import { foldTransform, needsRecentre, positionsCenter, shiftPositions, transformedCenter } from './render/origin';
+import { foldTransform, needsRecentre, positionsBounds, shiftPositions, transformedCenter } from './render/origin';
 
 const DEFAULT_BACKGROUND: [Color, Color] = [
   [0.86, 0.89, 0.92],
@@ -57,6 +76,18 @@ const DEFAULT_BACKGROUND: [Color, Color] = [
 const BULK_CHUNK = 32768;
 
 type Listener<K extends keyof ViewerEvents> = (payload: ViewerEvents[K]) => void;
+
+/** A running `load()`. */
+interface LoadEntry {
+  task: LoadTask;
+  name: string;
+  ctx: LoadContextImpl<unknown> | null;
+  /** Auto-frame this load (first model, or `fitToView: true`). */
+  fit: boolean;
+  /** Bounds (origin-relative) of the last automatic fit, null before the first one. */
+  fitted: Float64Array | null;
+  contentDirty: boolean;
+}
 
 export class Viewer implements ViewerApi {
   readonly canvas: HTMLCanvasElement;
@@ -69,7 +100,7 @@ export class Viewer implements ViewerApi {
   readonly controls: OrbitControls | null;
   readonly renderer: Renderer;
 
-  private readonly up: 'y' | 'z';
+  readonly up: 'y' | 'z';
   private readonly autoSelect: boolean;
   private readonly pixelRatio: number | undefined;
 
@@ -77,15 +108,41 @@ export class Viewer implements ViewerApi {
   private readonly origin = new Float64Array(3);
   private originSet = false;
 
-  // geometry handles: core geometry id + recentring offset (handles are never reused)
+  // geometry handles: core geometry id + recentring offset + local bounds. A released handle is
+  // recycled once no mesh uses it (meshGeom must keep pointing at the right offset until then).
   private geomCore: Int32Array = new Int32Array(64);
   private geomOff: Float64Array = new Float64Array(64 * 3);
+  private geomBox: Float64Array = new Float64Array(64 * 6);
   private geomAlive: Uint8Array = new Uint8Array(64);
+  /** Alive meshes per handle. */
+  private geomUses: Int32Array = new Int32Array(64);
   private geomCount = 0;
+  private geomFree: number[] = [];
   /** Geometry handle of every mesh (for setTransform). */
   private meshGeom: Int32Array = new Int32Array(1024);
 
+  // objectId allocator (one per scene, shared by all loaded models)
+  private nextObjectId = DEFAULT_OBJECT_ID_BASE;
+  /** Batch group of the next load (0 = meshes added directly). */
+  private nextBatchGroup = 1;
+
+  // models
+  private registry: LoaderRegistry | null = null;
+  private readonly loaded: ModelImpl[] = [];
+  private modelsView: readonly Model[] | null = null;
+  private readonly loading = new Set<LoadEntry>();
+  /** Sorted objectId runs of loaded models: [start, end) -> model, rebuilt when models change. */
+  private runStart = new Float64Array(0);
+  private runEnd = new Float64Array(0);
+  private runModel: ModelImpl[] = [];
+  private runsDirty = false;
+  private readonly fitCamEye = new Float64Array(3);
+  private readonly fitCamTarget = new Float64Array(3);
+  private fitCamValid = false;
+
   private readonly m64 = new Float64Array(16);
+  private readonly m32 = new Float32Array(16);
+  private readonly boxTmp = new Float64Array(6);
   private readonly bulk = new Float32Array(BULK_CHUNK * 16);
   private readonly tmp3 = new Float64Array(3);
 
@@ -100,6 +157,9 @@ export class Viewer implements ViewerApi {
     selection: new Set(),
     camera: new Set(),
     frameComplete: new Set(),
+    modelLoaded: new Set(),
+    modelUnloaded: new Set(),
+    loadProgress: new Set(),
   };
   private lastCamera: CameraState | null = null;
 
@@ -117,6 +177,10 @@ export class Viewer implements ViewerApi {
     this.up = options.up ?? 'y';
     this.autoSelect = options.autoSelect ?? true;
     this.pixelRatio = options.pixelRatio;
+    if (options.loaders) {
+      this.registry = new LoaderRegistry();
+      for (const p of options.loaders) this.registry.register(p);
+    }
 
     const ctx = GlContext.create(canvas);
     if (ctx.caps.maxTextureSize < FRAG_TEX_WIDTH) {
@@ -189,23 +253,32 @@ export class Viewer implements ViewerApi {
 
   createGeometry(data: GeometryData): GeometryId {
     const c = this.tmp3;
-    positionsCenter(data.positions, c);
+    const box = this.boxTmp;
+    positionsBounds(data.positions, box, 0, c);
     let d = data;
     if (needsRecentre(c)) {
       d = { positions: shiftPositions(data.positions, c), indices: data.indices, normals: data.normals };
     }
     const core = this.scene.createGeometry(d);
-    const id = this.geomCount++;
-    if (id >= this.geomCore.length) {
-      this.geomCore = growI32(this.geomCore, id + 1);
-      this.geomAlive = growU8(this.geomAlive, id + 1);
-      this.geomOff = growF64(this.geomOff, (id + 1) * 3);
+    let id: number;
+    if (this.geomFree.length > 0) id = this.geomFree.pop()!;
+    else {
+      id = this.geomCount++;
+      if (id >= this.geomCore.length) {
+        this.geomCore = growI32(this.geomCore, id + 1);
+        this.geomAlive = growU8(this.geomAlive, id + 1);
+        this.geomUses = growI32(this.geomUses, id + 1);
+        this.geomOff = growF64(this.geomOff, (id + 1) * 3);
+        this.geomBox = growF64(this.geomBox, (id + 1) * 6);
+      }
     }
     this.geomCore[id] = core;
     this.geomAlive[id] = 1;
+    this.geomUses[id] = 0;
     this.geomOff[id * 3] = c[0];
     this.geomOff[id * 3 + 1] = c[1];
     this.geomOff[id * 3 + 2] = c[2];
+    this.geomBox.set(box, id * 6);
     return id;
   }
 
@@ -213,6 +286,17 @@ export class Viewer implements ViewerApi {
     if (!(id >= 0 && id < this.geomCount) || !this.geomAlive[id]) return;
     this.geomAlive[id] = 0;
     this.scene.releaseGeometry(this.geomCore[id]);
+    if (this.geomUses[id] === 0) this.geomFree.push(id);
+  }
+
+  getGeometryBounds(id: GeometryId): Float64Array | null {
+    if (!(id >= 0 && id < this.geomCount) || !this.geomAlive[id]) return null;
+    return this.geomBox.slice(id * 6, id * 6 + 6);
+  }
+
+  /** Geometry handles in use (diagnostics: live handles + released ones still used by meshes). */
+  get geometryHandleCount(): number {
+    return this.geomCount - this.geomFree.length;
   }
 
   createMaterial(params?: MaterialParams): MaterialId {
@@ -224,14 +308,19 @@ export class Viewer implements ViewerApi {
     this.renderer.invalidateImage();
   }
 
+  releaseMaterial(id: MaterialId): void {
+    this.scene.releaseMaterial(id);
+  }
+
   addMesh(params: MeshParams): MeshId {
     const g = this.geometryHandle(params.geometry);
     const m = params.transform ?? null;
     if (m && m.length < 16) throw new Error('mk-viewer: transform must have 16 elements');
     this.ensureOrigin(m, 0, g);
     foldTransform(m, 0, this.geomOff.subarray(g * 3, g * 3 + 3), this.origin, this.m64, 0);
-    const id = this.scene.addMesh(this.geomCore[g], params.material, this.m64, params.objectId);
+    const id = this.scene.addMesh(this.geomCore[g], params.material, this.m64, params.objectId, params.batchGroup ?? 0);
     this.setMeshGeom(id, 1, g);
+    this.geomUses[g]++;
     this.renderer.noteAppend();
     return id;
   }
@@ -267,23 +356,51 @@ export class Viewer implements ViewerApi {
         typeof mat === 'number' ? mat : slice(mat, s, s + k),
         buf.subarray(0, k * 16),
         ids ? slice(ids, s, s + k) : undefined,
+        params.batchGroup ?? 0,
       );
       if (first < 0) first = f;
     }
     this.setMeshGeom(first, n, g);
+    this.geomUses[g] += n;
     this.renderer.noteAppend();
     return first;
   }
 
   remove(ids: MeshId | ArrayLike<number>): void {
-    if (this.scene.remove(ids) > 0) {
+    const sc = this.scene;
+    let n = 0;
+    if (typeof ids === 'number') {
+      if (sc.isAlive(ids)) {
+        this.unuseGeom(this.meshGeom[ids]);
+        n = sc.remove(ids);
+      }
+    } else {
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (!sc.isAlive(id)) continue;
+        this.unuseGeom(this.meshGeom[id]);
+        n += sc.remove(id);
+      }
+    }
+    if (n > 0) {
       this.ghostDirty = true;
       this.renderer.invalidateImage();
     }
   }
 
+  /**
+   * Removes everything: running loads are aborted and loaded models unloaded (`modelUnloaded` is
+   * emitted for each). Geometry and material handles stay valid.
+   */
   clear(): void {
+    for (const e of Array.from(this.loading)) e.task.abort();
+    for (const m of this.loaded.slice()) m.unload();
     this.scene.clear();
+    this.geomUses.fill(0);
+    const free = new Set(this.geomFree);
+    for (let g = 0; g < this.geomCount; g++) {
+      if (!this.geomAlive[g] && !free.has(g)) this.geomFree.push(g);
+    }
     // a new scene may live elsewhere: pick a new origin with the next mesh (camera is shifted then)
     this.originSet = false;
     this.selectionCount = 0;
@@ -301,28 +418,93 @@ export class Viewer implements ViewerApi {
     this.renderer.invalidateImage();
   }
 
+  setTransforms(first: MeshId, transforms: ArrayLike<number>): void {
+    const n = Math.floor(transforms.length / 16);
+    if (n * 16 !== transforms.length) throw new Error('mk-viewer: transforms length must be a multiple of 16');
+    if (n === 0) return;
+    const buf = this.bulk;
+    const geomOff = this.geomOff;
+    const meshGeom = this.meshGeom;
+    const sc = this.scene;
+    const o = this.origin;
+    const off = this.tmp3;
+    for (let s = 0; s < n; s += BULK_CHUNK) {
+      const k = Math.min(BULK_CHUNK, n - s);
+      for (let i = 0; i < k; i++) {
+        const id = first + s + i;
+        if (!sc.isAlive(id)) continue;
+        const g = meshGeom[id];
+        off[0] = geomOff[g * 3];
+        off[1] = geomOff[g * 3 + 1];
+        off[2] = geomOff[g * 3 + 2];
+        foldTransform(transforms, (s + i) * 16, off, o, buf, i * 16);
+      }
+      sc.setTransforms(first + s, buf.subarray(0, k * 16));
+    }
+    this.renderer.invalidateImage();
+  }
+
+  getTransforms(first: MeshId, count: number, out?: Float64Array): Float64Array {
+    const res = out ?? new Float64Array(count * 16);
+    if (res.length < count * 16) throw new Error('mk-viewer: getTransforms output too small');
+    const fr = this.scene.fragments;
+    const m = this.m32;
+    const o = this.origin;
+    for (let i = 0; i < count; i++) {
+      const id = first + i;
+      const r = i * 16;
+      if (!fr.isAlive(id)) {
+        res.fill(0, r, r + 16);
+        continue;
+      }
+      fr.getTransform(id, m);
+      const g = this.meshGeom[id];
+      const ox = this.geomOff[g * 3], oy = this.geomOff[g * 3 + 1], oz = this.geomOff[g * 3 + 2];
+      // world = T(origin) * core * T(-offset), in float64
+      for (let k = 0; k < 12; k++) res[r + k] = m[k];
+      res[r + 3] = res[r + 7] = res[r + 11] = 0;
+      for (let row = 0; row < 3; row++) {
+        res[r + 12 + row] = m[12 + row] + o[row] - (m[row] * ox + m[4 + row] * oy + m[8 + row] * oz);
+      }
+      res[r + 15] = 1;
+    }
+    return res;
+  }
+
   setMaterial(id: MeshId, material: MaterialId): void {
     if (!this.scene.isAlive(id)) return;
     this.scene.setMaterial(id, material);
     this.renderer.invalidateImage();
   }
 
+  allocObjectIds(count: number): number {
+    if (!(count >= 0) || Math.floor(count) !== count) throw new RangeError(`mk-viewer: allocObjectIds: invalid count ${count}`);
+    const first = this.nextObjectId;
+    this.nextObjectId += count;
+    return first;
+  }
+
+  /** Sets the next objectId `allocObjectIds` hands out (e.g. to restore saved ids). */
+  setNextObjectId(id: number): void {
+    this.nextObjectId = id;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // per-object state
 
-  setVisible(objectIds: number | ArrayLike<number>, visible: boolean): void {
+  setVisible(objectIds: ObjectSelection, visible: boolean): void {
     this.scene.setVisible(objectIds, visible);
     this.ghostDirty = true;
     this.renderer.invalidateImage();
   }
 
-  isolate(objectIds: ArrayLike<number> | null, hideOthers = false): void {
+  isolate(objectIds: ObjectSelection | null, hideOthers = false): void {
     this.scene.isolate(objectIds, hideOthers);
     this.ghostDirty = true;
     this.renderer.invalidateImage();
   }
 
-  setColor(objectIds: number | ArrayLike<number>, color: Color | null): void {
+  setColor(objectIds: ObjectSelection, color: Color | null): void {
     this.scene.setColor(objectIds, color);
     this.renderer.invalidateImage();
   }
@@ -366,20 +548,185 @@ export class Viewer implements ViewerApi {
     this.applyCamera(rel, animate);
   }
 
-  fitToView(objectIds?: ArrayLike<number>, animate = false): void {
+  fitToView(objectIds?: ObjectSelection, animate = false): void {
     const box = this.scene.getBounds(objectIds);
     if (!box) return;
     const s = this.camera.computeFitState(box, 1.05);
     if (s) this.applyCamera(s, animate);
   }
 
-  getBounds(objectIds?: ArrayLike<number>): Float32Array | null {
+  /** World bounds in float64 (the origin offset is added in double precision). */
+  getBounds(objectIds?: ObjectSelection): Float64Array | null {
     const b = this.scene.getBounds(objectIds);
     if (!b) return null;
     const o = this.origin;
-    const out = new Float32Array(6);
+    const out = new Float64Array(6);
     for (let i = 0; i < 6; i++) out[i] = b[i] + o[i % 3];
     return out;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // models
+
+  get models(): readonly Model[] {
+    return (this.modelsView ??= Object.freeze(this.loaded.slice()));
+  }
+
+  load<O = Record<string, unknown>>(input: LoaderInput, options: ViewerLoadOptions<O> = {}): LoadTask {
+    if (this.disposed) throw new Error('mk-viewer: load() after dispose()');
+    const fit = options.fitToView ?? (this.loaded.length === 0 && this.loading.size === 0 && this.scene.meshCount === 0);
+    const entry: LoadEntry = {
+      task: null as unknown as LoadTask,
+      name: options.name ?? inputName(input),
+      ctx: null,
+      fit,
+      fitted: null,
+      contentDirty: false,
+    };
+    const { fitToView: _f, ...rest } = options;
+    const task = loadModel<O>(
+      this,
+      input,
+      { ...rest, registry: options.registry ?? this.registry ?? defaultRegistry, up: options.up ?? this.up },
+      {
+        batchGroup: this.nextBatchGroup++,
+        onContext: (c) => (entry.ctx = c),
+        onContent: () => {
+          entry.contentDirty = true;
+        },
+      },
+    );
+    entry.task = task;
+    this.loading.add(entry);
+    task.onProgress((p) => this.emit('loadProgress', { task, name: entry.name, fraction: p.fraction, stage: p.stage }));
+    task.then(
+      (model) => this.modelLoaded(entry, model as ModelImpl),
+      (e) => {
+        this.loading.delete(entry);
+        const aborted = !!e && typeof e === 'object' && (e as { name?: unknown }).name === 'AbortError';
+        this.emit('loadProgress', { task, name: entry.name, fraction: task.progress, stage: aborted ? 'aborted' : 'failed' });
+      },
+    );
+    return task;
+  }
+
+  registerLoader(plugin: LoaderPlugin<any>): () => void {
+    this.registry ??= new LoaderRegistry(defaultRegistry);
+    return this.registry.register(plugin);
+  }
+
+  /** The registry `load()` uses (the viewer's own, or the shared default). */
+  get loaderRegistry(): LoaderRegistry {
+    return this.registry ?? defaultRegistry;
+  }
+
+  getModelOf(objectId: number): Model | undefined {
+    if (this.runsDirty) this.rebuildRuns();
+    const s = this.runStart;
+    let lo = 0, hi = s.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (s[mid] <= objectId) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    // hi = last run starting at or before objectId
+    return hi >= 0 && objectId < this.runEnd[hi] ? this.runModel[hi] : undefined;
+  }
+
+  groupByModel(objectIds: ArrayLike<number>): Map<Model | null, number[]> {
+    const out = new Map<Model | null, number[]>();
+    for (let i = 0; i < objectIds.length; i++) {
+      const id = objectIds[i];
+      const m = this.getModelOf(id) ?? null;
+      let list = out.get(m);
+      if (!list) out.set(m, (list = []));
+      list.push(id);
+    }
+    return out;
+  }
+
+  private modelLoaded(entry: LoadEntry, model: ModelImpl): void {
+    this.loading.delete(entry);
+    if (this.disposed) return;
+    this.loaded.push(model);
+    this.modelsView = null;
+    this.runsDirty = true;
+    model.onUnload = (m) => this.modelGone(m);
+    if (entry.fit) this.autoFit(entry, model.bounds, true);
+    this.emit('modelLoaded', model);
+  }
+
+  private modelGone(m: ModelImpl): void {
+    const i = this.loaded.indexOf(m);
+    if (i < 0) return;
+    this.loaded.splice(i, 1);
+    this.modelsView = null;
+    this.runsDirty = true;
+    this.emit('modelUnloaded', m);
+  }
+
+  private rebuildRuns(): void {
+    this.runsDirty = false;
+    const tmp: { s: number; c: number; m: ModelImpl }[] = [];
+    for (const m of this.loaded) {
+      const r = m.objectIdRuns();
+      for (let k = 0; k < r.length; k += 2) tmp.push({ s: r[k], c: r[k + 1], m });
+    }
+    tmp.sort((a, b) => a.s - b.s);
+    const n = tmp.length;
+    this.runStart = new Float64Array(n);
+    this.runEnd = new Float64Array(n);
+    this.runModel = new Array(n);
+    for (let k = 0; k < n; k++) {
+      this.runStart[k] = tmp[k].s;
+      this.runEnd[k] = tmp[k].s + tmp[k].c;
+      this.runModel[k] = tmp[k].m;
+    }
+  }
+
+  /** Progressive framing of auto-fit loads, once per frame while content arrives. */
+  private fitLoading(): void {
+    for (const e of this.loading) {
+      if (!e.fit || !e.contentDirty || !e.ctx) continue;
+      e.contentDirty = false;
+      this.autoFit(e, e.ctx.currentBounds(), false);
+    }
+  }
+
+  /**
+   * Frames `world` (float64 world bounds) for an auto-fit load unless the user moved the camera
+   * since the last automatic fit. While loading, it refits only when the bounds outgrew the last
+   * fitted ones notably (each fit restarts the progressive image).
+   */
+  private autoFit(e: LoadEntry, world: Float64Array | null, final: boolean): void {
+    if (!world || !this.originSet) return;
+    const cam = this.camera;
+    if (e.fitted && this.fitCamValid) {
+      const E = this.fitCamEye, T = this.fitCamTarget;
+      if (cam.eye[0] !== E[0] || cam.eye[1] !== E[1] || cam.eye[2] !== E[2] ||
+          cam.target[0] !== T[0] || cam.target[1] !== T[1] || cam.target[2] !== T[2]) {
+        e.fit = false; // the user took over
+        return;
+      }
+    }
+    const o = this.origin;
+    const rel = new Float64Array(6);
+    for (let i = 0; i < 6; i++) rel[i] = world[i] - o[i % 3];
+    const f = e.fitted;
+    if (f) {
+      const diag = Math.hypot(f[3] - f[0], f[4] - f[1], f[5] - f[2]);
+      const tol = final ? diag * 0.1 : diag * 0.25;
+      let grew = false;
+      for (let i = 0; i < 3; i++) if (rel[i] < f[i] - tol || rel[i + 3] > f[i + 3] + tol) grew = true;
+      if (!grew) return;
+    }
+    const s = cam.computeFitState(rel, 1.05);
+    if (!s) return;
+    this.applyCamera(s, false);
+    e.fitted = rel;
+    this.fitCamEye.set(cam.eye);
+    this.fitCamTarget.set(cam.target);
+    this.fitCamValid = true;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -391,12 +738,15 @@ export class Viewer implements ViewerApi {
     const objectId = this.scene.objectIdOf(r.meshId);
     if (objectId !== objectId) return null; // removed meanwhile
     const o = this.origin;
-    return {
+    const res: PickResult = {
       meshId: r.meshId,
       objectId,
       position: [r.position[0] + o[0], r.position[1] + o[1], r.position[2] + o[2]],
       distance: r.distance,
     };
+    const model = this.getModelOf(objectId);
+    if (model) res.model = model;
+    return res;
   }
 
   setSectionPlanes(planes: SectionPlane[]): void {
@@ -444,6 +794,8 @@ export class Viewer implements ViewerApi {
 
   dispose(): void {
     if (this.disposed) return;
+    for (const e of Array.from(this.loading)) e.task.abort();
+    this.loading.clear();
     this.disposed = true;
     const c = this.canvas;
     c.removeEventListener('click', this.onClick);
@@ -465,6 +817,11 @@ export class Viewer implements ViewerApi {
       throw new Error(`mk-viewer: invalid geometry id ${id}`);
     }
     return id;
+  }
+
+  /** One mesh of handle g went away: recycle the handle when it was released and is now unused. */
+  private unuseGeom(g: number): void {
+    if (--this.geomUses[g] === 0 && !this.geomAlive[g]) this.geomFree.push(g);
   }
 
   private setMeshGeom(first: number, n: number, g: number): void {
@@ -529,6 +886,7 @@ export class Viewer implements ViewerApi {
   }
 
   private beforeFrame(dt: number): boolean {
+    if (this.loading.size > 0) this.fitLoading();
     let animating = false;
     if (this.controls) animating = this.controls.update(dt) || this.controls.animating;
     if (this.transition.active) animating = this.transition.step(this.camera, dt) || animating;
@@ -673,6 +1031,21 @@ export class Viewer implements ViewerApi {
     }
     this.emit('hover', r);
   }
+}
+
+/** Display name of a load input: File name, or the last URL path segment. */
+function inputName(input: LoaderInput): string {
+  if (typeof input === 'string' || input instanceof URL) {
+    const path = String(input).split(/[?#]/)[0];
+    const seg = path.substring(path.lastIndexOf('/') + 1);
+    try {
+      return decodeURIComponent(seg) || 'model';
+    } catch {
+      return seg || 'model';
+    }
+  }
+  const n = (input as { name?: unknown }).name;
+  return typeof n === 'string' && n ? n : 'model';
 }
 
 function parseBackground(bg: ViewerOptions['background']): [number[], number[]] {

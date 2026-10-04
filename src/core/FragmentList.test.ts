@@ -50,13 +50,21 @@ describe('FragmentList', () => {
     fl.release(5);
     fl.kill(9);
     fl.release(9);
-    expect(fl.alloc()).toBe(9);
+    // lowest recycled slot first
     expect(fl.alloc()).toBe(5);
+    expect(fl.alloc()).toBe(9);
     expect(fl.alloc()).toBe(FRAG_RECORDS_PER_ROW + 10);
-    // bulk ranges never use the free list
+    // a bulk range uses the free list only for a consecutive run
     fl.kill(3);
     fl.release(3);
     expect(fl.allocRange(4)).toBe(FRAG_RECORDS_PER_ROW + 11);
+    for (const i of [20, 22, 21, 23, 40]) {
+      fl.kill(i);
+      fl.release(i);
+    }
+    expect(fl.allocRange(4)).toBe(20);
+    expect(fl.alloc()).toBe(3);
+    expect(fl.alloc()).toBe(40);
   });
 
   it('coalesces dirty rows so bulk adds give one range', () => {

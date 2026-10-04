@@ -163,7 +163,10 @@ export interface LoadContext<O = Record<string, unknown>> {
   /** objectIds default to freshly allocated ones. Transforms are model-local. */
   addMeshes(params: MeshBatchParams): MeshId;
 
-  /** Reserves `count` consecutive scene-unique objectIds; returns the first. */
+  /**
+   * Reserves `count` consecutive scene-unique objectIds; returns the first. Delegates to
+   * `viewer.allocObjectIds` (one allocator for the whole scene, so models never share ids).
+   */
   allocObjectIds(count: number): number;
 
   // --- metadata ---
@@ -200,7 +203,11 @@ export interface LoadOptions<O = Record<string, unknown>> {
   signal?: AbortSignal;
   onProgress?: (p: LoadProgress) => void;
   onWarning?: (message: string) => void;
-  /** Extra model-to-world transform (column-major, affine), applied after up conversion. */
+  /**
+   * Placement: extra model-to-world transform (column-major, affine), applied after the up
+   * conversion and composed in float64 (georeferenced placements ~1e7 keep full precision).
+   * `model.setTransform` changes it later.
+   */
   transform?: Mat4;
   /** Up axis of the scene (the viewer's `up`). Default 'y'. */
   up?: UpAxis;
@@ -247,10 +254,21 @@ export interface Model {
   /** Plugin that loaded it. */
   readonly loader: string;
   readonly stats: Readonly<ModelStats>;
-  /** World-space [minx, miny, minz, maxx, maxy, maxz] (float64), or null when empty. */
+  /**
+   * World-space [minx, miny, minz, maxx, maxy, maxz] (float64), or null when empty. Computed at load
+   * time and moved with `setTransform` (exact for translations, conservative under rotation);
+   * `getBounds()` gives the exact current bounds.
+   */
   readonly bounds: Float64Array | null;
-  /** All objectIds of this model lie in [first, first+count) (other models' ids may interleave). */
+  /**
+   * All objectIds of this model lie in [first, first+count). With concurrent loads other models' ids
+   * may interleave; `objectIdRuns()` gives the exact ranges.
+   */
   readonly objectIdRange: { first: number; count: number };
+  /** Current placement (LoadOptions.transform, or the last `setTransform`); identity when none. */
+  readonly transform: Float64Array;
+  /** False after `setVisible(false)`. */
+  readonly visible: boolean;
   readonly warnings: readonly string[];
   readonly info: Readonly<Record<string, unknown>>;
   readonly hierarchy: ModelHierarchy;
@@ -262,8 +280,28 @@ export interface Model {
   objectIds(): Float64Array;
   /** Node name and plugin-provided properties for an objectId of this model. */
   getProperties(objectId: number): Record<string, unknown> | undefined;
+  /** The exact objectId ranges of this model as [first0, count0, first1, count1, ...] (fresh array). */
+  objectIdRuns(): Float64Array;
+  /** True when the objectId belongs to this model. */
+  containsObject(objectId: number): boolean;
+  /** Shows / hides the whole model (other models untouched). */
   setVisible(visible: boolean): void;
-  /** Removes the model's meshes and releases its geometries. Idempotent. */
+  /** Shows only this model; all other content is ghosted, or hidden with `hideOthers`. */
+  isolate(hideOthers?: boolean): void;
+  /** Frames the camera on this model. */
+  fitToView(animate?: boolean): void;
+  /** Exact current world bounds of the model's meshes (float64), or null when empty / unloaded. */
+  getBounds(): Float64Array | null;
+  /**
+   * Re-places the model: replaces the placement (LoadOptions.transform) by `transform`, composed in
+   * float64 like at load time. One bulk update of all meshes; repeated calls do not accumulate error.
+   */
+  setTransform(transform: Mat4): void;
+  /**
+   * Removes the model's meshes and releases its geometries and materials (geometry shared with other
+   * models stays until they are unloaded too). Names and properties are dropped as well; the Model
+   * object only keeps its stats and id ranges. Idempotent.
+   */
   unload(): void;
 }
 

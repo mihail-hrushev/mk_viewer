@@ -24,7 +24,22 @@ export class LoaderError extends Error {
 
 const HEADER_BYTES = 256;
 
-export function loadModel<O = Record<string, unknown>>(viewer: ViewerApi, input: LoaderInput, options: LoadOptions<O> = {}): LoadTask {
+/** @internal Hooks used by `Viewer.load` (model registry, progressive camera fit). */
+export interface LoadHooks {
+  /** The load context, once the plugin is chosen (before the plugin runs). */
+  onContext?(ctx: LoadContextImpl<unknown>): void;
+  /** Content was added by the plugin. */
+  onContent?(): void;
+  /** `batchGroup` for every mesh of this load (keeps the model's draw items separate). */
+  batchGroup?: number;
+}
+
+export function loadModel<O = Record<string, unknown>>(
+  viewer: ViewerApi,
+  input: LoaderInput,
+  options: LoadOptions<O> = {},
+  hooks: LoadHooks = {},
+): LoadTask {
   const controller = new AbortController();
   const ext = options.signal;
   const onExtAbort = () => controller.abort();
@@ -82,13 +97,15 @@ export function loadModel<O = Record<string, unknown>>(viewer: ViewerApi, input:
     const plugin = await choosePlugin(registry, source, options, signal);
     const t0 = now();
 
-    const up = options.up ?? 'y';
+    const up = options.up ?? (viewer as Partial<ViewerApi>).up ?? 'y';
     const from = options.sourceUp ?? plugin.up ?? up;
     const conv = upConversion(from, up);
     let root: Float64Array | null = conv;
+    let placement: Float64Array | null = null;
     if (options.transform) {
       if (options.transform.length < 16) throw new LoaderError('LoadOptions.transform must have 16 elements');
       const t = Float64Array.from(options.transform);
+      placement = isIdentity(t) ? null : t;
       if (conv) {
         root = new Float64Array(16);
         multiply(root, 0, t, 0, conv, 0); // user transform applied after the up conversion
@@ -101,10 +118,14 @@ export function loadModel<O = Record<string, unknown>>(viewer: ViewerApi, input:
       signal,
       options: (options.options ?? {}) as Partial<O>,
       rootTransform: root,
+      placement,
       sliceMs: options.sliceMs ?? 8,
       onProgress: (f, stage) => report(dlWeight + (1 - dlWeight) * Math.min(1, Math.max(0, f)), stage ?? 'build'),
       onWarning: (m) => options.onWarning?.(m),
+      onContent: hooks.onContent,
+      batchGroup: hooks.batchGroup,
     });
+    hooks.onContext?.(ctx as LoadContextImpl<unknown>);
     let extras: void | Partial<{ name: string; info: Record<string, unknown> }>;
     try {
       extras = await plugin.load(source, ctx as LoadContextImpl<any>);

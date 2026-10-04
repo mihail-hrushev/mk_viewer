@@ -24,7 +24,8 @@ src/core/          CPU scene data: FragmentList, GeometryStore, MaterialStore, B
 src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, data textures, render targets,
                    GLSL sources (uber-shader), async pixel reader
 src/render/        Renderer: progressive frame loop, passes, picking, overlays
-src/Viewer.ts      public Viewer class implementing ViewerApi
+src/loaders/       model loader plugins: contract, registry, loadModel, glTF + OBJ plugins, scheduler
+src/Viewer.ts      public Viewer class implementing ViewerApi (incl. model loading / federation)
 src/index.ts       library entry (exports Viewer + types)
 examples/          demo pages served by `npm run dev`
 ```
@@ -62,7 +63,9 @@ Two drawing paths, same shader (fragment index arrives as a per-vertex or a per-
 2. **Instanced chunks.** Geometry used by many fragments (threshold, e.g. >= 16 uses, or very large
    meshes) is stored once (`SHARED_VERTEX_STRIDE`) and drawn with `drawElementsInstanced`;
    the per-instance attribute is a u32 fragment index. Instances are grouped into spatially
-   coherent chunks so they can be culled.
+   coherent chunks so they can be culled. Geometry of >= 1024 vertices that gets new users while
+   others sit in merged batches (typically a second model sharing it) also switches to instancing,
+   and the merged batches holding it are rebuilt, so shared geometry is stored on the GPU once.
 
 Each batch / chunk is a **draw item**: bounds, page, index range, instance range, opaque or
 transparent. Draw items are stored SoA. Draw items in the same page share one VAO and are
@@ -71,8 +74,29 @@ submitted together with `WEBGL_multi_draw` when available (fallback: loop of dra
 Dynamic behaviour: `addMesh`/`addMeshes` queue fragments; the Batcher flushes the queue once per
 frame into new batches (so adding 100k meshes in one tick yields a few dozen batches). Removal
 clears the Visible flag immediately and records the hole; a time-sliced idle task compacts batches
-with many holes and merges undersized batches. Transform changes update the fragment record and
-grow/refit the owning draw item's bounds.
+with many holes, merges undersized batches and moves batches out of sparse sealed pages so their GPU
+buffers are released (e.g. after a model is unloaded). Transform changes update the fragment record
+and grow the owning item's bounds at once; at the next flush the moved items are refitted exactly
+(bounds also shrink), an item whose moved members drifted away from unmoved ones (an item shared by
+two models, one re-placed) is split by re-batching moved and unmoved members apart, and many refits
+at once rebuild the BVH. Bulk adds reuse runs of recycled fragment slots, so load / unload cycles
+do not grow the slot range.
+
+## Models and federation
+
+`src/loaders/` holds the plugin contract, registry, `loadModel` and the built-in glTF / OBJ plugins
+(see its README). `Viewer.load` runs a plugin through a tracking `LoadContext` and keeps the loaded
+`Model`s: each owns disjoint objectId ranges from the viewer's single allocator (`allocObjectIds`,
+starting at 2^30), so `getModelOf` is a binary search over a sorted run table. Per-model visibility,
+isolation, bounds and fit go through `{ first, count }` objectId ranges (no per-object arrays);
+`model.setTransform` re-places all meshes through the bulk `setTransforms` path from a snapshot of the
+load-time matrices (no accumulated error). Unload removes meshes and releases geometry (ref-counted,
+so geometry shared with another model stays) and materials (slots recycled once unused). Concurrent
+loads share one FIFO scheduler (one slice per macrotask, round-robin) that is frame-paced in
+browsers: all loads together get half the frame interval (8..50 ms) per animation frame, so each
+frame batches and uploads a bounded amount of new content and the picture fills in progressively.
+The first model is framed progressively while it loads (until the user moves the camera); later
+models never move the camera unless asked.
 
 ## Culling and ordering
 

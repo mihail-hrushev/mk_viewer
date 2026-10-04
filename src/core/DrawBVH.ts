@@ -122,6 +122,59 @@ export class DrawBVH {
     return true;
   }
 
+  /**
+   * Largest view depth of content that is in front of the eye and at least `minPx` pixels on screen
+   * (draw items with visible members; whole subtrees below the size are skipped), or -Infinity.
+   * `fz` = view-space depth row (-row 2 of the view matrix: depth = fz0*x + fz1*y + fz2*z + fz3).
+   * Used to keep the near plane small when far-away content (e.g. a distant federated model) is
+   * sub-pixel anyway.
+   */
+  visibleDepthMax(
+    items: DrawItems,
+    fz0: number, fz1: number, fz2: number, fz3: number,
+    ex: number, ey: number, ez: number,
+    pixelScale: number,
+    minPx: number,
+  ): number {
+    if (this.nodeCount === 0) return -Infinity;
+    this.stack = grow(this.stack, this.nodeCount * 2 + 4);
+    const stack = this.stack;
+    const nb = this.nodeBounds;
+    const child = this.nodeChild;
+    const ib = items.bounds;
+    const vis = items.visibleFrags;
+    let best = -Infinity;
+    let sp = 0;
+    stack[sp++] = 0;
+    const far = (b: Float32Array, o: number): number =>
+      fz3 + (fz0 > 0 ? fz0 * b[o + 3] : fz0 * b[o]) + (fz1 > 0 ? fz1 * b[o + 4] : fz1 * b[o + 1]) +
+      (fz2 > 0 ? fz2 * b[o + 5] : fz2 * b[o + 2]);
+    while (sp > 0) {
+      const node = stack[--sp];
+      const o = node * 6;
+      const hi = far(nb, o);
+      if (hi <= 0 || hi <= best) continue; // behind the eye, or cannot raise the maximum
+      if (aabbDiag(nb, o) * pixelScale < minPx * distToAabb(ex, ey, ez, nb, o)) continue;
+      const c = child[node];
+      if (c >= 0) {
+        stack[sp++] = c;
+        stack[sp++] = c + 1;
+        continue;
+      }
+      const s = this.nodeStart[node];
+      for (let k = 0; k < this.nodePrimCount[node]; k++) {
+        const it = this.prims[s + k];
+        if (vis[it] === 0) continue;
+        const io = it * 6;
+        const h = far(ib, io);
+        if (h <= best) continue;
+        if (aabbDiag(ib, io) * pixelScale < minPx * distToAabb(ex, ey, ez, ib, io)) continue;
+        best = h;
+      }
+    }
+    return best;
+  }
+
   /** Full binned-SAH rebuild over all live items. */
   build(items: DrawItems): void {
     const hw = items.highWater;

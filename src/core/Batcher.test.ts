@@ -188,7 +188,7 @@ describe('Batcher instanced path', () => {
     expect(s.triangleCount).toBe(n * 12);
   });
 
-  it('keeps already merged fragments merged when a geometry crosses the threshold', () => {
+  it('moves already merged fragments to the shared copy when a geometry crosses the threshold', () => {
     const s = new Scene({ instanceThreshold: 16 });
     const mat = s.createMaterial();
     const g = s.createGeometry(boxGeometry());
@@ -197,8 +197,30 @@ describe('Batcher instanced path', () => {
     expect(liveItems(s).map((i) => s.items.kind[i])).toEqual([ITEM_MERGED]);
     for (let i = 0; i < 10; i++) s.addMesh(g, mat, trs(i, 5, 0));
     s.flush();
+    // the geometry is now stored once: every fragment draws from the shared page
+    expect(liveItems(s).map((i) => s.items.kind[i])).toEqual([ITEM_INSTANCED]);
+    expect(s.items.instanceCount[liveItems(s)[0]]).toBe(20);
+    expect(s.batcher.migratedItems).toBe(1);
+    checkConsistency(s);
+  });
+
+  it('instances large geometry reused across flushes (e.g. by a second model) and migrates the merged copy', () => {
+    const s = new Scene({ instanceThreshold: 16, reuseInstanceVertices: 24 });
+    const mat = s.createMaterial();
+    const big = s.createGeometry(boxGeometry()); // 24 vertices: "large" here
+    const small = s.createGeometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0] });
+    s.addMesh(big, mat, trs(0, 0, 0));
+    s.addMesh(small, mat, trs(1, 0, 0));
+    s.flush();
+    expect(liveItems(s).map((i) => s.items.kind[i])).toEqual([ITEM_MERGED]);
+    // a later flush reuses both: only the large one switches; the small one stays merged (copied)
+    s.addMesh(big, mat, trs(0, 3, 0));
+    s.addMesh(small, mat, trs(1, 3, 0));
+    s.flush();
     const kinds = liveItems(s).map((i) => s.items.kind[i]).sort();
     expect(kinds).toEqual([ITEM_MERGED, ITEM_INSTANCED]);
+    const inst = liveItems(s).find((i) => s.items.kind[i] === ITEM_INSTANCED)!;
+    expect(s.items.instanceCount[inst]).toBe(2);
     checkConsistency(s);
   });
 
@@ -396,5 +418,49 @@ describe('Scene per-object state', () => {
     expect(Array.from(s.getBounds()!)).toEqual([-0.5, -0.5, -0.5, 198.5, 0.5, 0.5]);
     expect(s.getBounds([42])).toBeNull();
     expect(s.objectIdOf(37)).toBe(1003);
+  });
+});
+
+describe('Batcher: moved members, batch groups', () => {
+  it('refits moved items exactly (bounds shrink again) and splits items whose members drifted apart', () => {
+    const s = new Scene();
+    const mat = s.createMaterial();
+    const g = s.createGeometry(boxGeometry());
+    for (let i = 0; i < 10; i++) s.addMesh(g, mat, trs(i * 2, 0, 0));
+    s.flush();
+    expect(liveItems(s).length).toBe(1);
+    const it = liveItems(s)[0];
+    // move everything rigidly: no split, exact bounds at the new place
+    for (let f = 0; f < 10; f++) s.setTransform(f, trs(1000 + f * 2, 0, 0));
+    s.flush();
+    expect(s.batcher.lastSplitCount).toBe(0);
+    expect(s.items.bounds[it * 6]).toBeCloseTo(999.5, 4);
+    // move one member far away: the item is split, no item spans the gap
+    s.setTransform(3, trs(-5000, 0, 0));
+    s.flush();
+    expect(s.batcher.lastSplitCount).toBe(1);
+    const items = liveItems(s);
+    expect(items.length).toBe(2);
+    for (const i of items) expect(s.items.bounds[i * 6 + 3] - s.items.bounds[i * 6]).toBeLessThan(30);
+    checkConsistency(s);
+  });
+
+  it('never consolidates meshes of different batch groups', () => {
+    const s = new Scene({ instanceThreshold: 8 });
+    const mat = s.createMaterial();
+    const small = s.createGeometry({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0] }); // 6 uses: merged
+    const inst = s.createGeometry(boxGeometry()); // 10 uses: instanced
+    for (let i = 0; i < 6; i++) s.addMesh(small, mat, trs(i, 0, 0), undefined, i % 2 ? 7 : 3);
+    for (let i = 0; i < 10; i++) s.addMesh(inst, mat, trs(i, 2, 0), undefined, i % 2 ? 7 : 3);
+    s.flush();
+    const kinds = liveItems(s).map((i) => `${s.items.kind[i]}:${s.items.group[i]}`).sort();
+    expect(kinds).toEqual([`${ITEM_MERGED}:3`, `${ITEM_MERGED}:7`, `${ITEM_INSTANCED}:3`, `${ITEM_INSTANCED}:7`].sort());
+    for (const i of liveItems(s)) for (const f of membersOf(s, i)) expect(s.fragments.group[f]).toBe(s.items.group[i]);
+    // compaction does not merge undersized items across groups (and settles)
+    let rounds = 0;
+    while (s.compact(100) && rounds < 10) rounds++;
+    expect(rounds).toBeLessThan(10);
+    expect(liveItems(s).length).toBe(4);
+    checkConsistency(s);
   });
 });

@@ -56,6 +56,13 @@ export class DrawItems {
   detailSize: Float32Array;
   detailCount: Uint32Array;
   detailLen: Uint8Array;
+  /**
+   * Incremented every time a slot is (re)allocated, so per-item state kept elsewhere (the renderer's
+   * "already drawn in this image" stamps) can tell a new item in a reused slot from the old one.
+   */
+  gen: Uint32Array;
+  /** Batch group of the members. */
+  group: Int32Array;
 
   private freeList: number[] = [];
 
@@ -82,6 +89,8 @@ export class DrawItems {
     this.detailSize = new Float32Array(c * DETAIL_STEPS);
     this.detailCount = new Uint32Array(c * DETAIL_STEPS);
     this.detailLen = new Uint8Array(c);
+    this.gen = new Uint32Array(c);
+    this.group = new Int32Array(c);
   }
 
   /** Removed member slots still occupying the item. */
@@ -97,6 +106,7 @@ export class DrawItems {
       if (i >= this.capacity) this.growTo(this.capacity * 2);
     }
     this.kind[i] = kind;
+    this.gen[i]++;
     this.transparent[i] = 0;
     this.page[i] = -1;
     this.instancePage[i] = -1;
@@ -147,6 +157,8 @@ export class DrawItems {
     this.detailSize = g(this.detailSize, c * DETAIL_STEPS);
     this.detailCount = g(this.detailCount, c * DETAIL_STEPS);
     this.detailLen = g(this.detailLen, c);
+    this.gen = g(this.gen, c);
+    this.group = g(this.group, c);
   }
 }
 

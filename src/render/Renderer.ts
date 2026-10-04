@@ -182,6 +182,7 @@ export class Renderer {
   private compactPending = false;
   private drawnImage = new Uint32Array(256);
   private drawnCount = new Uint32Array(256);
+  private drawnGen = new Uint32Array(256);
   private progressTotal = 0;
   private progressDone = 0;
 
@@ -244,6 +245,13 @@ export class Renderer {
     this.submitter = new DrawSubmitter(ctx);
     this.budget = new BudgetController({ targetMs: opts.frameBudgetMs });
     this.background = [Float32Array.from(opts.background[0]), Float32Array.from(opts.background[1])];
+    // near plane from visible content: distant sub-pixel content must not push it out
+    camera.visibleDepth = (fz0, fz1, fz2, fz3, pixelScale) => {
+      const e = camera.eye;
+      const canvas = this.ctx.canvas as HTMLCanvasElement;
+      const dpr = this.targets.height / (canvas.clientHeight || this.targets.height);
+      return scene.bvh.visibleDepthMax(scene.items, fz0, fz1, fz2, fz3, e[0], e[1], e[2], pixelScale / (dpr > 0 ? dpr : 1), 0.5);
+    };
     this.offRestored = ctx.on('restored', () => {
       this.budget.resetCeiling();
       this.invalidateImage();
@@ -641,10 +649,14 @@ export class Renderer {
     const b = new Uint32Array(cap);
     b.set(this.drawnCount);
     this.drawnCount = b;
+    const c = new Uint32Array(cap);
+    c.set(this.drawnGen);
+    this.drawnGen = c;
   }
 
+  /** Elements of item `it` already in the current image (0 for an item re-allocated since). */
   private skipOf(it: number): number {
-    return this.drawnImage[it] === this.imageId ? this.drawnCount[it] : 0;
+    return this.drawnImage[it] === this.imageId && this.drawnGen[it] === this.scene.items.gen[it] ? this.drawnCount[it] : 0;
   }
 
   /** Work units of list entry e with `skip` elements already drawn. */
@@ -927,6 +939,7 @@ export class Renderer {
           if (opaque) {
             this.drawnImage[it] = imageId;
             this.drawnCount[it] = cnt;
+            this.drawnGen[it] = items.gen[it];
           }
         }
         sub.flush();
@@ -942,6 +955,7 @@ export class Renderer {
           if (opaque) {
             this.drawnImage[it] = imageId;
             this.drawnCount[it] = cnt;
+            this.drawnGen[it] = items.gen[it];
           }
         }
       }

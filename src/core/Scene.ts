@@ -9,7 +9,7 @@
  *
  * All per-mesh state lives in typed arrays; bulk adds create no per-instance JS objects.
  */
-import type { Color, GeometryData, MaterialParams, Mat4 } from '../types';
+import type { Color, GeometryData, MaterialParams, Mat4, ObjectIdRange, ObjectSelection } from '../types';
 import { FragFlags } from '../layout';
 import { Batcher, type BatcherOptions } from './Batcher';
 import { DrawBVH, DrawList, type CullView } from './DrawBVH';
@@ -72,6 +72,14 @@ export class Scene {
     return this.materials.create(params);
   }
 
+  /**
+   * Invalidates a material handle; its slot is recycled once no alive mesh uses it (meshes still
+   * referencing it keep rendering with it until removed or given another material).
+   */
+  releaseMaterial(id: number): boolean {
+    return this.materials.release(id);
+  }
+
   updateMaterial(id: number, params: MaterialParams): void {
     if (!this.materials.update(id, params)) return;
     // opaque <-> transparent: affected fragments must move to items of the other pass
@@ -88,7 +96,7 @@ export class Scene {
   // --- meshes ----------------------------------------------------------------
 
   /** Adds one mesh; returns its MeshId (fragment index). objectId defaults to the MeshId. */
-  addMesh(geometry: number, material: number, transform?: Mat4 | null, objectId?: number): number {
+  addMesh(geometry: number, material: number, transform?: Mat4 | null, objectId?: number, group = 0): number {
     this.checkGeometry(geometry);
     this.checkMaterial(material);
     if (transform && transform.length < 16) throw new Error('transform must have 16 elements');
@@ -96,7 +104,9 @@ export class Scene {
     const gs = this.geometries;
     const f = fr.alloc();
     fr.init(f, geometry, gs.dequant, gs.aabb, material, objectId ?? f, transform ?? null, 0);
+    fr.group[f] = group;
     gs.addUse(geometry);
+    this.materials.addUse(material);
     this.triangleCount += gs.indexCount[geometry] / 3;
     this.batcher.enqueue(f);
     return f;
@@ -112,6 +122,7 @@ export class Scene {
     material: number | ArrayLike<number>,
     transforms: ArrayLike<number>,
     objectIds?: ArrayLike<number>,
+    group = 0,
   ): number {
     this.checkGeometry(geometry);
     const n = transforms.length / 16;
@@ -127,11 +138,15 @@ export class Scene {
     const first = fr.allocRange(n);
     const dq = gs.dequant;
     const aabb = gs.aabb;
+    const ms = this.materials;
     for (let i = 0; i < n; i++) {
       const f = first + i;
       const mat = perInstance ? (material as ArrayLike<number>)[i] : (material as number);
       fr.init(f, geometry, dq, aabb, mat, objectIds ? objectIds[i] : f, transforms, i * 16);
+      if (perInstance) ms.addUse(mat);
     }
+    if (!perInstance) ms.addUse(material as number, n);
+    if (group !== 0) fr.group.fill(group, first, first + n);
     gs.addUse(geometry, n);
     this.triangleCount += (n * gs.indexCount[geometry]) / 3;
     this.batcher.enqueueRange(first, n);
@@ -152,6 +167,7 @@ export class Scene {
     this.pages.clear();
     this.fragments.clear();
     this.geometries.resetUses();
+    this.materials.resetUses();
     this.triangleCount = 0;
     this.selectionCount = 0;
     this.highlighted = NaN;
@@ -164,11 +180,32 @@ export class Scene {
     this.batcher.boundsChanged(id);
   }
 
+  /**
+   * Bulk transform update of consecutive MeshIds first .. first + n - 1 (n = transforms.length / 16);
+   * not-alive ids are skipped. Draw item bounds are refitted exactly at the next flush, once per item.
+   */
+  setTransforms(first: number, transforms: ArrayLike<number>): void {
+    const n = Math.floor(transforms.length / 16);
+    const fr = this.fragments;
+    const aabb = this.geometries.aabb;
+    const b = this.batcher;
+    for (let i = 0; i < n; i++) {
+      const f = first + i;
+      if (!fr.isAlive(f)) continue;
+      fr.setTransform(f, transforms, i * 16, aabb);
+      b.boundsChanged(f);
+    }
+  }
+
   setMaterial(id: number, material: number): void {
     const fr = this.fragments;
     if (!fr.isAlive(id)) return;
     this.checkMaterial(material);
+    const old = fr.materialOf(id);
+    if (old === material) return;
     fr.setMaterial(id, material);
+    this.materials.addUse(material);
+    this.materials.removeUse(old);
     const it = fr.item[id];
     if (it >= 0 && this.items.transparent[it] !== this.materials.transparent[material]) {
       this.batcher.rebuildItem(it);
@@ -186,18 +223,17 @@ export class Scene {
 
   // --- per-objectId state -------------------------------------------------------
 
-  setVisible(objectIds: number | ArrayLike<number>, visible: boolean): void {
+  setVisible(objectIds: ObjectSelection, visible: boolean): void {
     const set = visible ? FragFlags.Visible : 0;
     const clr = visible ? 0 : FragFlags.Visible;
-    if (typeof objectIds === 'number') this.objectFlags(objectIds, set, clr);
-    else for (let i = 0; i < objectIds.length; i++) this.objectFlags(objectIds[i], set, clr);
+    forEachObject(objectIds, (id) => this.objectFlags(id, set, clr));
   }
 
   /**
    * Shows only these objects (made visible, un-ghosted); others are ghosted, or hidden when
    * hideOthers. `null` ends isolation (same as showAll()).
    */
-  isolate(objectIds: ArrayLike<number> | null, hideOthers = false): void {
+  isolate(objectIds: ObjectSelection | null, hideOthers = false): void {
     if (objectIds === null) {
       this.showAll();
       return;
@@ -207,10 +243,9 @@ export class Scene {
     this.mark = grow(this.mark, hw);
     const mark = this.mark;
     mark.fill(0, 0, hw);
-    for (let i = 0; i < objectIds.length; i++) {
-      const id = objectIds[i];
+    forEachObject(objectIds, (id) => {
       for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) mark[f] = 1;
-    }
+    });
     const V = FragFlags.Visible;
     const G = FragFlags.Ghosted;
     for (let f = 0; f < hw; f++) {
@@ -234,7 +269,7 @@ export class Scene {
   }
 
   /** Colour override (sRGB; optional 4th component = blend strength, default 1); null restores. */
-  setColor(objectIds: number | ArrayLike<number>, color: Color | null): void {
+  setColor(objectIds: ObjectSelection, color: Color | null): void {
     let r = 0, g = 0, b = 0, a = 0;
     if (color) {
       r = srgbToLinear(color[0]);
@@ -246,8 +281,7 @@ export class Scene {
     const one = (id: number) => {
       for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) fr.setColor(f, r, g, b, a);
     };
-    if (typeof objectIds === 'number') one(objectIds);
-    else for (let i = 0; i < objectIds.length; i++) one(objectIds[i]);
+    forEachObject(objectIds, one);
   }
 
   /** Replaces the selection. */
@@ -293,7 +327,7 @@ export class Scene {
    * Exact world bounds of the given objects (or all alive meshes) as a new Float32Array(6), or
    * null when empty. O(meshes) for the whole scene; intended for fit-to-view, not per frame.
    */
-  getBounds(objectIds?: ArrayLike<number>): Float32Array | null {
+  getBounds(objectIds?: ObjectSelection): Float32Array | null {
     const fr = this.fragments;
     const b = fr.bounds;
     const out = new Float32Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
@@ -308,11 +342,10 @@ export class Scene {
       if (b[o + 5] > out[5]) out[5] = b[o + 5];
       any = true;
     };
-    if (objectIds) {
-      for (let i = 0; i < objectIds.length; i++) {
-        const id = objectIds[i];
+    if (objectIds !== undefined) {
+      forEachObject(objectIds, (id) => {
         for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) acc(f);
-      }
+      });
     } else {
       for (let f = 0; f < fr.highWater; f++) if (fr.isAlive(f)) acc(f);
     }
@@ -357,6 +390,8 @@ export class Scene {
     const fr = this.fragments;
     if (!fr.isAlive(id)) return false;
     this.triangleCount -= this.geometries.indexCount[fr.geometry[id]] / 3;
+    // a removed fragment is collapsed (flags 0), so its material slot may be recycled right away
+    this.materials.removeUse(fr.materialOf(id));
     return this.batcher.removeFragment(id);
   }
 
@@ -375,4 +410,19 @@ export class Scene {
   private checkMaterial(id: number): void {
     if (!this.materials.isValid(id)) throw new Error(`invalid material id ${id}`);
   }
+}
+
+/** True for `{ first, count }`. */
+export function isObjectIdRange(sel: unknown): sel is ObjectIdRange {
+  return typeof sel === 'object' && sel !== null && typeof (sel as ObjectIdRange).first === 'number' &&
+    typeof (sel as ObjectIdRange).count === 'number' && (sel as ArrayLike<number>).length === undefined;
+}
+
+/** Calls fn for every objectId of a selection (one id, a list, or a `{ first, count }` range). */
+export function forEachObject(sel: ObjectSelection, fn: (id: number) => void): void {
+  if (typeof sel === 'number') fn(sel);
+  else if (isObjectIdRange(sel)) {
+    const end = sel.first + sel.count;
+    for (let id = sel.first; id < end; id++) fn(id);
+  } else for (let i = 0; i < sel.length; i++) fn(sel[i]);
 }

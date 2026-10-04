@@ -6,9 +6,13 @@ import type {
   MaterialParams,
   MeshBatchParams,
   MeshParams,
+  ObjectSelection,
   ViewerApi,
   ViewerStats,
 } from '../../types';
+import { forEachObject } from '../../core/Scene';
+import { loadModel } from '../loadModel';
+import { allocObjectIdsFallback } from '../objectIds';
 
 export interface MockGeometry {
   vertices: number;
@@ -22,6 +26,7 @@ export interface MockGeometry {
   normals?: Float64Array;
   /** Was the input a view on a larger buffer (zero-copy from the loader)? */
   positionsWasView: boolean;
+  box: Float64Array;
 }
 
 export interface MockMesh {
@@ -36,6 +41,7 @@ export interface MockMesh {
 export interface MockViewer extends ViewerApi {
   geometries: MockGeometry[];
   materials: MaterialParams[];
+  releasedMaterials: Set<number>;
   meshes: MockMesh[];
   calls: { createGeometry: number; addMesh: number; addMeshes: number; remove: number; setVisible: number };
   liveMeshes(): number;
@@ -48,6 +54,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
   const keep = !!opts.keepData;
   const geometries: MockGeometry[] = [];
   const materials: MaterialParams[] = [];
+  const releasedMaterials = new Set<number>();
   const meshes: MockMesh[] = [];
   const calls = { createGeometry: 0, addMesh: 0, addMeshes: 0, remove: 0, setVisible: 0 };
   const stats: ViewerStats = {
@@ -59,8 +66,9 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
   const checkGeom = (g: number) => {
     if (!(g >= 0 && g < geometries.length) || geometries[g].released) throw new Error(`mock: invalid geometry ${g}`);
   };
-  const forObjects = (ids: number | ArrayLike<number>, fn: (m: MockMesh) => void) => {
-    const set = new Set<number>(typeof ids === 'number' ? [ids] : Array.from(ids));
+  const forObjects = (ids: ObjectSelection, fn: (m: MockMesh) => void) => {
+    const set = new Set<number>();
+    forEachObject(ids, (id) => set.add(id));
     for (const m of meshes) if (m.alive && set.has(m.objectId)) fn(m);
   };
 
@@ -68,10 +76,13 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     canvas: {} as HTMLCanvasElement,
     primitives: {} as ViewerApi['primitives'],
     stats,
+    up: 'y',
     geometries,
     materials,
+    releasedMaterials,
     meshes,
     calls,
+    models: [],
     liveMeshes: () => meshes.filter((m) => m.alive).length,
     liveGeometries: () => geometries.filter((g) => !g.released).length,
 
@@ -82,6 +93,13 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
       // consume the data like the real viewer does (one pass), validate
       for (let i = 0; i < p.length; i++) if (!Number.isFinite(p[i])) throw new Error('mock: non-finite position');
       const vc = p.length / 3;
+      const box = new Float64Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]);
+      for (let i = 0; i + 2 < p.length; i += 3) {
+        for (let k = 0; k < 3; k++) {
+          if (p[i + k] < box[k]) box[k] = p[i + k];
+          if (p[i + k] > box[k + 3]) box[k + 3] = p[i + k];
+        }
+      }
       if (data.indices) for (let i = 0; i < data.indices.length; i++) if (data.indices[i] >= vc) throw new Error('mock: index out of range');
       if (data.normals && data.normals.length !== p.length) throw new Error('mock: normals length');
       const g: MockGeometry = {
@@ -91,6 +109,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
         hasNormals: !!data.normals,
         released: false,
         positionsWasView: ArrayBuffer.isView(p) && (p as Float32Array).byteLength < (p as Float32Array).buffer.byteLength,
+        box,
       };
       if (keep) {
         g.positions = Float64Array.from(p);
@@ -103,6 +122,37 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     releaseGeometry(id) {
       if (geometries[id]) geometries[id].released = true;
     },
+    getGeometryBounds(id) {
+      const g = geometries[id];
+      return g && !g.released ? g.box.slice() : null;
+    },
+    releaseMaterial(id) {
+      releasedMaterials.add(id);
+    },
+    allocObjectIds(count) {
+      return allocObjectIdsFallback(v, count);
+    },
+    setTransforms(first, tr) {
+      for (let i = 0; i * 16 < tr.length; i++) {
+        const m = meshes[first + i];
+        if (m && m.alive) m.transform = Float64Array.from({ length: 16 }, (_, k) => +tr[i * 16 + k]);
+      }
+    },
+    getTransforms(first, count, out) {
+      const res = out ?? new Float64Array(count * 16);
+      for (let i = 0; i < count; i++) {
+        const m = meshes[first + i];
+        if (m && m.alive) res.set(m.transform, i * 16);
+        else res.fill(0, i * 16, i * 16 + 16);
+      }
+      return res;
+    },
+    load(input, options) {
+      return loadModel(v, input, options);
+    },
+    registerLoader: () => () => {},
+    getModelOf: () => undefined,
+    groupByModel: (ids) => new Map([[null, Array.from(ids)]]),
     createMaterial(params?: MaterialParams) {
       materials.push({ ...(params ?? {}) });
       return materials.length - 1;

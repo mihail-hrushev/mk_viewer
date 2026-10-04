@@ -6,15 +6,23 @@ it is given. The context wraps `ViewerApi` and handles bookkeeping that every lo
 repeat: unload, abort cleanup, objectIds, metadata, up-axis and global transforms, progress, bounds.
 
 ```ts
-import { loadModel, registerDefaultLoaders, defaultRegistry } from 'mk-viewer';
+import { Viewer, gltfLoader, objLoader } from 'mk-viewer';
 
-registerDefaultLoaders();                  // glTF (.glb/.gltf) + OBJ; or defaultRegistry.register(gltfLoader)
-defaultRegistry.register(myIfcLoader);     // your own format
+// per-viewer registry (only the plugins you import are bundled); or viewer.registerLoader(plugin),
+// or registerDefaultLoaders() / defaultRegistry.register(plugin) for the shared registry
+const viewer = new Viewer(canvas, { up: 'z', loaders: [gltfLoader, objLoader, myIfcLoader] });
 
-const task = loadModel(viewer, fileOrUrlOrBuffer, { up: 'z', onProgress: (p) => bar(p.fraction) });
+const task = viewer.load(fileOrUrlOrBuffer, { transform: placement }); // up defaults to the viewer's
+task.onProgress((p) => bar(p.fraction));
 cancelButton.onclick = () => task.abort(); // the scene is left clean
 const model = await task;                  // Model: stats, bounds, hierarchy, getProperties, unload()
 ```
+
+Several loads may run at once (federation): they share one round-robin, frame-paced scheduler and
+appear progressively. `viewer.models` lists loaded models, `viewer.getModelOf(objectId)` finds the
+owner of a picked object (`PickResult.model`), and each model can be shown/hidden, isolated,
+framed, re-placed (`model.setTransform`) and unloaded without touching the others. `loadModel(viewer,
+input, options)` is the same pipeline without the viewer's model registry (works with any `ViewerApi`).
 
 ## The contract (`types.ts`)
 

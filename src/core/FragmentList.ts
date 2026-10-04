@@ -53,6 +53,8 @@ export class FragmentList {
   bounds: Float32Array;
   geometry: Int32Array;
   objectId: Float64Array;
+  /** Batch group: fragments of different groups never share a draw item. */
+  group: Int32Array;
   flags: Uint8Array;
   state: Uint8Array;
   item: Int32Array;
@@ -62,6 +64,8 @@ export class FragmentList {
   private readonly objHead = new NumberMap(1024);
   private freeList: Int32Array;
   private freeCount = 0;
+  /** freeList[0..freeCount) is sorted descending (pop yields the lowest slot; runs are adjacent). */
+  private freeSorted = true;
   readonly dirty: DirtyRows;
 
   constructor(initialCapacity = FRAG_RECORDS_PER_ROW) {
@@ -71,6 +75,7 @@ export class FragmentList {
     this.bounds = new Float32Array(cap * 6);
     this.geometry = new Int32Array(cap);
     this.objectId = new Float64Array(cap);
+    this.group = new Int32Array(cap);
     this.flags = new Uint8Array(cap);
     this.state = new Uint8Array(cap);
     this.item = new Int32Array(cap).fill(-1);
@@ -99,18 +104,59 @@ export class FragmentList {
     return this.records[i * FRAG_FLOATS + FRAG_MATERIAL];
   }
 
-  /** Allocates one slot (recycled from the free list when possible). */
+  /** Allocates one slot (recycled from the free list when possible, lowest first). */
   alloc(): number {
-    if (this.freeCount > 0) return this.freeList[--this.freeCount];
+    if (this.freeCount > 0) {
+      // lowest slots first keeps the high free slots contiguous for bulk allocRange()
+      if (!this.freeSorted) this.sortFree();
+      return this.freeList[--this.freeCount];
+    }
     return this.allocRange(1);
   }
 
-  /** Allocates `n` consecutive slots at the top (bulk adds need consecutive MeshIds). */
+  private sortFree(): void {
+    const l = this.freeList.subarray(0, this.freeCount);
+    l.sort();
+    l.reverse();
+    this.freeSorted = true;
+  }
+
+  /**
+   * Allocates `n` consecutive slots (bulk adds need consecutive MeshIds): a run of recycled slots
+   * when the free list has one (so load / unload cycles do not grow the slot range), else at the top.
+   */
   allocRange(n: number): number {
+    if (n > 1 && this.freeCount >= n) {
+      const r = this.takeFreeRun(n);
+      if (r >= 0) return r;
+    } else if (n === 1 && this.freeCount > 0) {
+      return this.alloc();
+    }
     const first = this.highWater;
     this.ensureCapacity(first + n);
     this.highWater += n;
     return first;
+  }
+
+  /** Removes a run of n consecutive free slots from the free list; returns its first slot or -1. */
+  private takeFreeRun(n: number): number {
+    const fl = this.freeList;
+    const cnt = this.freeCount;
+    if (!this.freeSorted) this.sortFree();
+    // descending order: a run of n is fl[k] = v, fl[k+1] = v - 1, ..., fl[k+n-1] = v - n + 1.
+    // Scan from the end (lowest slots first).
+    let len = 1;
+    for (let k = cnt - 2; k >= 0; k--) {
+      if (fl[k] === fl[k + 1] + 1) {
+        if (++len === n) {
+          const first = fl[k + n - 1];
+          fl.copyWithin(k, k + n, cnt);
+          this.freeCount = cnt - n;
+          return first;
+        }
+      } else len = 1;
+    }
+    return -1;
   }
 
   ensureCapacity(n: number): void {
@@ -126,6 +172,7 @@ export class FragmentList {
     this.bounds = b;
     this.geometry = growTo(this.geometry, cap);
     this.objectId = growTo(this.objectId, cap);
+    this.group = growTo(this.group, cap);
     this.flags = growTo(this.flags, cap);
     this.state = growTo(this.state, cap);
     const old = this.item.length;
@@ -171,6 +218,7 @@ export class FragmentList {
     r[o + FRAG_COLOR + 2] = 0;
     r[o + FRAG_COLOR + 3] = 0;
     this.geometry[i] = geometry;
+    this.group[i] = 0;
     this.flags[i] = FragFlags.Visible;
     this.state[i] = STATE_ALIVE;
     this.item[i] = -1;
@@ -258,6 +306,7 @@ export class FragmentList {
       f.set(this.freeList);
       this.freeList = f;
     }
+    if (this.freeCount > 0 && this.freeList[this.freeCount - 1] < i) this.freeSorted = false;
     this.freeList[this.freeCount++] = i;
   }
 
@@ -293,6 +342,7 @@ export class FragmentList {
     this.highWater = 0;
     this.liveCount = 0;
     this.freeCount = 0;
+    this.freeSorted = true;
     this.objHead.clear();
   }
 

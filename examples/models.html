@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mk-viewer models</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #222;
+        color: #eee;
+        font: 12px/1.4 ui-monospace, Consolas, monospace;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #panel {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        max-width: min(420px, calc(100% - 32px));
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.6);
+        border-radius: 4px;
+      }
+      #panel button {
+        font: inherit;
+        padding: 0 4px;
+      }
+      #models div {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        white-space: nowrap;
+      }
+      #models span.name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+      }
+      #stats,
+      #picked,
+      #loads {
+        white-space: pre-wrap;
+      }
+      body.drag canvas {
+        outline: 3px dashed #6af;
+        outline-offset: -3px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="panel">
+      <input id="file" type="file" multiple accept=".glb,.gltf,.obj,.bin" />
+      <div id="loads"></div>
+      <div id="models"></div>
+      <div id="picked"></div>
+      <div id="stats"></div>
+    </div>
+    <script type="module" src="./models.ts"></script>
+  </body>
+</html>

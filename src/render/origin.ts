@@ -69,6 +69,32 @@ export function transformedCenter(m: ArrayLike<number> | null, mo: number, offse
   out[2] = +m[mo + 2] * x + +m[mo + 6] * y + +m[mo + 10] * z + +m[mo + 14];
 }
 
+/**
+ * AABB of xyz positions in float64 into out[oo .. oo+5] (min xyz, max xyz) and its centre into
+ * `center` (0,0,0 when empty or non-finite). One pass.
+ */
+export function positionsBounds(positions: ArrayLike<number>, out: Float64Array, oo: number, center: Float64Array): void {
+  let minx = Infinity, miny = Infinity, minz = Infinity;
+  let maxx = -Infinity, maxy = -Infinity, maxz = -Infinity;
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = +positions[i], y = +positions[i + 1], z = +positions[i + 2];
+    if (x < minx) minx = x;
+    if (x > maxx) maxx = x;
+    if (y < miny) miny = y;
+    if (y > maxy) maxy = y;
+    if (z < minz) minz = z;
+    if (z > maxz) maxz = z;
+  }
+  if (!(minx <= maxx)) minx = miny = minz = maxx = maxy = maxz = 0;
+  out[oo] = minx; out[oo + 1] = miny; out[oo + 2] = minz;
+  out[oo + 3] = maxx; out[oo + 4] = maxy; out[oo + 5] = maxz;
+  center[0] = (minx + maxx) * 0.5;
+  center[1] = (miny + maxy) * 0.5;
+  center[2] = (minz + maxz) * 0.5;
+  // non-finite input is reported by the geometry store; do not shift by NaN
+  if (!Number.isFinite(center[0] + center[1] + center[2])) center[0] = center[1] = center[2] = 0;
+}
+
 /** AABB centre of xyz positions in float64 into out (0,0,0 when empty). */
 export function positionsCenter(positions: ArrayLike<number>, out: Float64Array): void {
   let minx = Infinity, miny = Infinity, minz = Infinity;

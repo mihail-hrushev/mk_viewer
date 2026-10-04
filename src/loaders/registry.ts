@@ -9,6 +9,20 @@ export class LoaderRegistry {
   private plugins: LoaderPlugin<any>[] = [];
 
   /**
+   * @param fallback Registry whose plugins are also offered (looked up live), with this registry's own
+   *   plugins taking precedence (same name replaces, ties go to own plugins). A Viewer without
+   *   `ViewerOptions.loaders` uses this to add plugins on top of the shared `defaultRegistry`.
+   */
+  constructor(readonly fallback: LoaderRegistry | null = null) {}
+
+  /** Own plugins after the fallback's (minus names overridden here): later = higher priority. */
+  private all(): LoaderPlugin<any>[] {
+    if (!this.fallback) return this.plugins;
+    const own = new Set(this.plugins.map((p) => p.name));
+    return this.fallback.all().filter((p) => !own.has(p.name)).concat(this.plugins);
+  }
+
+  /**
    * Adds a plugin. A plugin with the same name is replaced. Returns a function that unregisters it.
    */
   register(plugin: LoaderPlugin<any>): () => void {
@@ -28,20 +42,20 @@ export class LoaderRegistry {
     return this.plugins.length !== n;
   }
 
-  /** Registered plugins, in registration order. */
+  /** Registered plugins (fallback registry's first), in priority order (last = highest). */
   list(): readonly LoaderPlugin<any>[] {
-    return this.plugins.slice();
+    return this.all().slice();
   }
 
   get(name: string): LoaderPlugin<any> | undefined {
-    return this.plugins.find((p) => p.name === name);
+    return this.all().find((p) => p.name === name);
   }
 
   /** Plugins claiming the file name's extension, best (longest extension, latest) first. */
   findByExtension(fileName: string): LoaderPlugin<any>[] {
     const lower = fileName.toLowerCase().split(/[?#]/)[0];
     const hits: { p: LoaderPlugin<any>; len: number; order: number }[] = [];
-    this.plugins.forEach((p, order) => {
+    this.all().forEach((p, order) => {
       let best = 0;
       for (const e of p.extensions) {
         const ext = e.toLowerCase().replace(/^\./, '');
@@ -55,7 +69,7 @@ export class LoaderRegistry {
 
   findByMimeType(mimeType: string): LoaderPlugin<any>[] {
     const m = mimeType.toLowerCase().split(';')[0].trim();
-    return this.plugins.filter((p) => p.mimeTypes?.some((t) => t.toLowerCase() === m)).reverse();
+    return this.all().filter((p) => p.mimeTypes?.some((t) => t.toLowerCase() === m)).reverse();
   }
 
   /**
@@ -78,8 +92,9 @@ export class LoaderRegistry {
       if (p) return p;
     }
     if (header && header.length > 0) {
-      for (let i = this.plugins.length - 1; i >= 0; i--) {
-        const p = this.plugins[i];
+      const all = this.all();
+      for (let i = all.length - 1; i >= 0; i--) {
+        const p = all[i];
         if (p.canLoad && safeCanLoad(p, { fileName: probe.fileName, mimeType: probe.mimeType, header })) return p;
       }
     }
@@ -88,8 +103,9 @@ export class LoaderRegistry {
 
   /** "gltf (.glb, .gltf), obj (.obj)" — for error messages. */
   describe(): string {
-    if (this.plugins.length === 0) return 'none (call registerDefaultLoaders() or registry.register(plugin))';
-    return this.plugins.map((p) => `${p.name} (${p.extensions.map((e) => '.' + e).join(', ')})`).join(', ');
+    const all = this.all();
+    if (all.length === 0) return 'none (call registerDefaultLoaders(), registry.register(plugin), viewer.registerLoader(plugin) or pass ViewerOptions.loaders)';
+    return all.map((p) => `${p.name} (${p.extensions.map((e) => '.' + e).join(', ')})`).join(', ');
   }
 }
 

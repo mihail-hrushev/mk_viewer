@@ -7,6 +7,11 @@
  *   const mat = viewer.createMaterial({ color: [0.8, 0.3, 0.2] });
  *   viewer.addMesh({ geometry: geo, material: mat });
  *   viewer.fitToView();
+ *
+ *   // models (loader plugins are registered explicitly)
+ *   import { Viewer, gltfLoader } from 'mk-viewer';
+ *   const viewer = new Viewer(canvas, { loaders: [gltfLoader] });
+ *   const model = await viewer.load('plant.glb');
  */
 export { Viewer } from './Viewer';
 export type {
@@ -16,7 +21,11 @@ export type {
   GeometryId,
   MaterialId,
   MeshId,
+  ObjectIdRange,
+  ObjectSelection,
   ViewerOptions,
+  ViewerLoadOptions,
+  ViewerLoadProgress,
   GeometryData,
   MaterialParams,
   MeshParams,
@@ -29,6 +38,12 @@ export type {
   Primitives,
   ViewerApi,
 } from './types';
+/**
+ * Model loaders (plugins): registry, loadModel and the built-in glTF / OBJ plugins. Registration is
+ * explicit, so unused plugins are tree-shaken: `new Viewer(canvas, { loaders: [gltfLoader] })`,
+ * `viewer.registerLoader(plugin)` or `registerDefaultLoaders()`.
+ */
+export * from './loaders';
 /** Raw GeometryData generators (positions/normals/indices) for users who build their own data. */
 export { box, sphere, cylinder, cone, plane, torus, extrusion, triangulate } from './primitives';
 export type { PrimitiveGeometry, UpAxis } from './primitives';

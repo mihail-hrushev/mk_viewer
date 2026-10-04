@@ -5,6 +5,8 @@
  * colours are sRGB in 0..1, angles are radians.
  */
 
+import type { LoaderInput, LoaderPlugin, LoadOptions, LoadTask, Model } from './loaders/types';
+
 export type Vec3 = [number, number, number] | Float32Array;
 export type Color = [number, number, number] | [number, number, number, number];
 /** Column-major 4x4, 16 numbers. Must be affine. */
@@ -15,6 +17,15 @@ export type GeometryId = number;
 export type MaterialId = number;
 /** Identifies one placed mesh (a "fragment"). Stable until removed. */
 export type MeshId = number;
+
+/** The consecutive objectIds first .. first + count - 1 (e.g. a loaded model's ids). */
+export interface ObjectIdRange {
+  first: number;
+  count: number;
+}
+
+/** objectIds for per-object operations: one id, a list, or a `{ first, count }` range. */
+export type ObjectSelection = number | ArrayLike<number> | ObjectIdRange;
 
 export interface ViewerOptions {
   /** World up axis. Default 'y'. */
@@ -33,6 +44,12 @@ export interface ViewerOptions {
   controls?: boolean;
   /** Click-to-select and hover highlight handled by the viewer. Default true. */
   autoSelect?: boolean;
+  /**
+   * Loader plugins of this viewer (`viewer.load`). When given (even empty), this per-viewer registry
+   * is used instead of the shared `defaultRegistry`; `registerLoader` adds to it. Plugins are only
+   * bundled when imported, e.g. `loaders: [gltfLoader, objLoader]`.
+   */
+  loaders?: LoaderPlugin<any>[];
 }
 
 export interface GeometryData {
@@ -63,6 +80,12 @@ export interface MeshParams {
    * (e.g. all parts of one door). Default: the MeshId.
    */
   objectId?: number;
+  /**
+   * Meshes of different batch groups are never consolidated into the same draw item, so a group
+   * (e.g. one loaded model) can be culled, moved and unloaded without affecting others' batches.
+   * `viewer.load` gives every model its own group. Default 0.
+   */
+  batchGroup?: number;
 }
 
 export interface MeshBatchParams {
@@ -72,11 +95,15 @@ export interface MeshBatchParams {
   /** 16 * count numbers, column-major matrices back to back. */
   transforms: ArrayLike<number>;
   objectIds?: ArrayLike<number>;
+  /** See `MeshParams.batchGroup`. */
+  batchGroup?: number;
 }
 
 export interface PickResult {
   meshId: MeshId;
   objectId: number;
+  /** The loaded model owning the object (undefined for meshes added directly or still loading). */
+  model?: Model;
   /** World-space hit position. */
   position: [number, number, number];
   /** Distance from the camera eye. */
@@ -123,6 +150,32 @@ export interface ViewerEvents {
   camera: CameraState;
   /** Progressive rendering finished: the image is complete. */
   frameComplete: ViewerStats;
+  /** A `viewer.load()` finished; the model is in `viewer.models`. */
+  modelLoaded: Model;
+  /** A model was unloaded (`model.unload()` or `clear()`). */
+  modelUnloaded: Model;
+  /** Progress of a running `viewer.load()`. */
+  loadProgress: ViewerLoadProgress;
+}
+
+export interface ViewerLoadProgress {
+  task: LoadTask;
+  /** File name (or URL path segment) of the input. */
+  name: string;
+  /** Overall 0..1, monotonic. */
+  fraction: number;
+  /** 'download' | 'detect' | plugin stage | 'done' | 'failed' | 'aborted'. */
+  stage: string;
+}
+
+/** Options of `viewer.load`; `up` defaults to the viewer's up axis, the registry to the viewer's. */
+export interface ViewerLoadOptions<O = Record<string, unknown>> extends LoadOptions<O> {
+  /**
+   * Frame the camera on this model while it loads and when it is done (until the user moves the
+   * camera). Default: true when no other model is loaded or loading and the scene is empty; later
+   * models never move the camera unless this is true.
+   */
+  fitToView?: boolean;
 }
 
 export interface Primitives {
@@ -141,26 +194,56 @@ export interface ViewerApi {
   readonly primitives: Primitives;
   readonly stats: ViewerStats;
 
+  /** World up axis (`ViewerOptions.up`). */
+  readonly up: 'y' | 'z';
+
   // --- scene construction (callable at any time, including every frame) ---
   createGeometry(data: GeometryData): GeometryId;
-  /** Frees the geometry once no mesh uses it. */
+  /** Frees the geometry once no mesh uses it. The handle may be reused afterwards. */
   releaseGeometry(id: GeometryId): void;
+  /**
+   * Local bounds of a geometry's positions as given to `createGeometry` [minx, miny, minz, maxx,
+   * maxy, maxz] (float64, fresh array), or null for an invalid id. O(1).
+   */
+  getGeometryBounds(id: GeometryId): Float64Array | null;
   createMaterial(params?: MaterialParams): MaterialId;
   updateMaterial(id: MaterialId, params: MaterialParams): void;
+  /**
+   * Invalidates a material handle (no new meshes or updates with it). Meshes still using it keep
+   * rendering with it; its slot is reused once the last of them is removed or re-assigned.
+   */
+  releaseMaterial(id: MaterialId): void;
   addMesh(params: MeshParams): MeshId;
   /** Bulk add; returns the first MeshId, the rest follow consecutively. */
   addMeshes(params: MeshBatchParams): MeshId;
   remove(ids: MeshId | ArrayLike<number>): void;
   clear(): void;
   setTransform(id: MeshId, transform: Mat4): void;
+  /**
+   * Bulk `setTransform` of the consecutive MeshIds first .. first + n - 1, n = transforms.length / 16
+   * (e.g. the range `addMeshes` returned). Removed ids are skipped. Use Float64Array for large
+   * coordinates.
+   */
+  setTransforms(first: MeshId, transforms: ArrayLike<number>): void;
+  /**
+   * World matrices of the consecutive MeshIds first .. first + count - 1 (column-major, 16 per mesh;
+   * removed ids give zeros) into `out` (allocated when omitted).
+   */
+  getTransforms(first: MeshId, count: number, out?: Float64Array): Float64Array;
   setMaterial(id: MeshId, material: MaterialId): void;
+  /**
+   * Reserves `count` consecutive objectIds that no other caller of this method (e.g. another loaded
+   * model) receives; returns the first. Ids start at 2^30 so they never collide with the default
+   * objectIds (= MeshIds) of meshes added without one.
+   */
+  allocObjectIds(count: number): number;
 
   // --- per-object state; these take objectIds and affect every mesh carrying that id ---
-  setVisible(objectIds: number | ArrayLike<number>, visible: boolean): void;
+  setVisible(objectIds: ObjectSelection, visible: boolean): void;
   /** Show only these objects; everything else is ghosted (or hidden when `hideOthers`). */
-  isolate(objectIds: ArrayLike<number> | null, hideOthers?: boolean): void;
+  isolate(objectIds: ObjectSelection | null, hideOthers?: boolean): void;
   /** Override colour; `null` restores the material colour. */
-  setColor(objectIds: number | ArrayLike<number>, color: Color | null): void;
+  setColor(objectIds: ObjectSelection, color: Color | null): void;
   select(objectIds: ArrayLike<number>): void;
   getSelection(): number[];
   showAll(): void;
@@ -169,9 +252,24 @@ export interface ViewerApi {
   getCamera(): CameraState;
   setCamera(state: Partial<CameraState>, animate?: boolean): void;
   /** Frame the given objects, or the whole scene. */
-  fitToView(objectIds?: ArrayLike<number>, animate?: boolean): void;
-  /** World-space bounds [minx, miny, minz, maxx, maxy, maxz], or null when empty. */
-  getBounds(objectIds?: ArrayLike<number>): Float32Array | null;
+  fitToView(objectIds?: ObjectSelection, animate?: boolean): void;
+  /** World-space bounds [minx, miny, minz, maxx, maxy, maxz] (float64), or null when empty. */
+  getBounds(objectIds?: ObjectSelection): Float64Array | null;
+
+  // --- models (loader plugins, federation) ---
+  /** Loaded models, in load-completion order (read-only snapshot). */
+  readonly models: readonly Model[];
+  /**
+   * Loads a model with a loader plugin (see src/loaders/README.md). Several loads may run at once;
+   * each returns its own abortable task. The first model is framed unless `fitToView: false`.
+   */
+  load<O = Record<string, unknown>>(input: LoaderInput, options?: ViewerLoadOptions<O>): LoadTask;
+  /** Adds a plugin to this viewer's own registry. Returns a function that unregisters it. */
+  registerLoader(plugin: LoaderPlugin<any>): () => void;
+  /** Model owning an objectId (binary search over the models' id ranges), or undefined. */
+  getModelOf(objectId: number): Model | undefined;
+  /** Groups objectIds (e.g. the selection) by owning model; ids of no model go under `null`. */
+  groupByModel(objectIds: ArrayLike<number>): Map<Model | null, number[]>;
 
   // --- queries and effects ---
   /** GPU pick at canvas CSS-pixel coordinates. */
