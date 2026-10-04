@@ -25,6 +25,15 @@
  *   u_contrast         float      tone curve exponent (1 = none, > 1 deepens darks)
  *   u_upView           vec3       world up expressed in view space (mat3(view) * up), unit
  *   u_ghostColor       vec4       linear rgb + opacity
+ *   Image-based lighting, ENVIRONMENT variant only (EnvironmentTexture, src/render/environment.ts).
+ *   It replaces the hemisphere ambient; without the define the shader is exactly the default one.
+ *   u_envTex           sampler2D  equirect RGBA16F with mips (unit UBER_ENV_TEX_UNIT), textureLod only
+ *   u_envMatrix        mat3       view space -> environment-local (view-to-world, world up -> +Y,
+ *                                 `rotation` about up)
+ *   u_envSH            vec3[9]    pre-multiplied irradiance / pi SH (times intensity), basis
+ *                                 1, y, z, x, xy, yz, 3z^2-1, xz, x^2-y^2 of the env-local normal
+ *   u_envParams        vec4       lodScale (lod = log2(rough^2 * lodScale)), max lod, specular
+ *                                 intensity, key light factor
  *   u_sectionPlaneCount int       (SECTION_PLANES variant only)
  *   u_sectionPlanes    vec4[MAX_SECTION_PLANES]  view space, discard where dot(xyz, p) + w > 0
  *
@@ -46,6 +55,12 @@ export interface UberShaderOptions {
    * planes are active: on many GPUs the mere presence of `discard` disables early depth testing.
    */
   sectionPlanes?: boolean;
+  /**
+   * Compile image-based lighting (environment map + SH irradiance) in place of the hemisphere
+   * ambient. A compile-time variant rather than a uniform switch, so the default program stays
+   * bit-for-bit the shader it was (a runtime branch changed the compiler's float evaluation order).
+   */
+  environment?: boolean;
 }
 
 const UBER_VS = /* glsl */ `
@@ -144,6 +159,12 @@ uniform vec3 u_groundColor;
 uniform float u_contrast;
 uniform vec3 u_upView;
 uniform vec4 u_ghostColor;
+#ifdef ENVIRONMENT
+uniform highp sampler2D u_envTex;
+uniform mat3 u_envMatrix;
+uniform vec3 u_envSH[9];
+uniform vec4 u_envParams;
+#endif
 #ifdef SECTION_PLANES
 uniform int u_sectionPlaneCount;
 uniform vec4 u_sectionPlanes[MAX_SECTION_PLANES];
@@ -167,6 +188,24 @@ ${SRGB}
 vec3 hemisphere(vec3 dir) {
   return mix(u_groundColor, u_skyColor, dot(dir, u_upView) * 0.5 + 0.5);
 }
+
+#ifdef ENVIRONMENT
+// Irradiance / pi of the environment for an env-local unit normal (order-2 SH polynomial).
+vec3 envIrradiance(vec3 n) {
+  vec3 e = u_envSH[0]
+    + u_envSH[1] * n.y + u_envSH[2] * n.z + u_envSH[3] * n.x
+    + u_envSH[4] * (n.x * n.y) + u_envSH[5] * (n.y * n.z) + u_envSH[6] * (3.0 * n.z * n.z - 1.0)
+    + u_envSH[7] * (n.x * n.z) + u_envSH[8] * (n.x * n.x - n.y * n.y);
+  return max(e, vec3(0.0));
+}
+
+// Environment radiance along an env-local unit direction (equirect; explicit lod, so no derivative
+// seam where u wraps at the back of the sphere).
+vec3 envRadiance(vec3 d, float lod) {
+  vec2 uv = vec2(atan(d.x, -d.z) * (0.5 / PI) + 0.5, acos(clamp(d.y, -1.0, 1.0)) * (1.0 / PI));
+  return textureLod(u_envTex, uv, lod).rgb;
+}
+#endif
 
 void main() {
 #ifdef SECTION_PLANES
@@ -221,11 +260,22 @@ void main() {
   vec3 F = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
   vec3 direct = (diffuseColor * (1.0 - F) + PI * D * vis * F) * NdotL * u_keyLightColor;
 
+#ifdef ENVIRONMENT
+  // Image-based: SH irradiance of the normal, specular from the mip chain along the reflection
+  // vector (roughness picks the mip), same Fresnel / energy split; key light reduced.
+  vec3 Fenv = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - NdotV, 5.0);
+  vec3 R = reflect(-V, N);
+  float lod = clamp(log2(a * u_envParams.x), 0.0, u_envParams.y);
+  vec3 envSpec = envRadiance(u_envMatrix * R, lod) * u_envParams.z;
+  vec3 ambient = diffuseColor * envIrradiance(u_envMatrix * N) * (1.0 - Fenv) + envSpec * Fenv;
+  direct *= u_envParams.w;
+#else
   // Hemisphere ambient, diffuse + roughness-blurred specular (no environment map needed).
   vec3 Fenv = F0 + (max(vec3(1.0 - rough), F0) - F0) * pow(1.0 - NdotV, 5.0);
   vec3 R = reflect(-V, N);
   vec3 envSpec = mix(hemisphere(R), 0.5 * (u_skyColor + u_groundColor), rough);
   vec3 ambient = diffuseColor * hemisphere(N) * (1.0 - Fenv) + envSpec * Fenv;
+#endif
 
   // Contrast curve on the lit colour: darks and mids go down, full brightness stays where it is.
   vec3 lit = pow(min(direct + ambient, vec3(1.0)), vec3(u_contrast));
@@ -252,7 +302,7 @@ export function uberVertexSource(): string {
 }
 
 export function uberFragmentSource(options: UberShaderOptions = {}): string {
-  return assembleShader(UBER_FS, { SECTION_PLANES: !!options.sectionPlanes });
+  return assembleShader(UBER_FS, { SECTION_PLANES: !!options.sectionPlanes, ENVIRONMENT: !!options.environment });
 }
 
 /** Pass kinds for u_passKind. */

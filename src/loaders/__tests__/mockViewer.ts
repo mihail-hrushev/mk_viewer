@@ -228,6 +228,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     getBounds: () => null,
     pick: async () => null,
     setSectionPlanes() {},
+    setEnvironment: async () => {},
+    getEnvironment: () => null,
     on: () => () => {},
     resize() {},
     invalidate() {},

@@ -30,6 +30,8 @@ const ALL: Record<string, string> = {
   uberVS: uberVertexSource(),
   uberFS: uberFragmentSource(),
   uberFSsection: uberFragmentSource({ sectionPlanes: true }),
+  uberFSenv: uberFragmentSource({ environment: true }),
+  uberFSenvSection: uberFragmentSource({ sectionPlanes: true, environment: true }),
   fullscreenVS: FULLSCREEN_VS,
   present: PRESENT_FS,
   background: BACKGROUND_FS,
@@ -95,6 +97,19 @@ describe('shader sources (static GLSL ES 3.00 checks)', () => {
     expect(vs).toContain(`const uint FRAG_TEXELS_PER_RECORD = ${FRAG_TEXELS}u;`);
     expect(vs).toContain(`const uint MAT_PER_ROW = ${MAT_RECORDS_PER_ROW}u;`);
     expect(ALL.uberFSsection).toContain(`const int MAX_SECTION_PLANES = ${MAX_SECTION_PLANES};`);
+  });
+
+  it('environment lighting only in the environment variants, sampled with explicit lod', () => {
+    expect(ALL.uberFS).not.toContain('#define ENVIRONMENT');
+    expect(ALL.uberFSsection).not.toContain('#define ENVIRONMENT');
+    expect(ALL.uberFSenv).toContain('#define ENVIRONMENT 1');
+    expect(ALL.uberFSenvSection).toContain('#define ENVIRONMENT 1');
+    expect(ALL.uberFSenvSection).toContain('#define SECTION_PLANES 1');
+    // no implicit-derivative lookups of the environment (seam at the u wrap)
+    expect(ALL.uberFSenv).not.toMatch(/texture\(\s*u_envTex/);
+    expect(ALL.uberFSenv).toContain('textureLod(u_envTex');
+    // the variant is the only difference: without defines the default source is unchanged
+    expect(uberFragmentSource({ environment: false })).toBe(ALL.uberFS);
   });
 
   it('section planes (discard) only in the section variant', () => {

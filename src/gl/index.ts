@@ -22,8 +22,11 @@ export {
   DEFAULT_LIGHTING,
   UBER_FRAG_TEX_UNIT,
   UBER_MAT_TEX_UNIT,
+  UBER_ENV_TEX_UNIT,
 } from './UberProgram';
-export type { LightingParams, UberPass } from './UberProgram';
+export type { EnvironmentUniforms, LightingParams, UberPass } from './UberProgram';
+export { EnvironmentTexture } from './EnvironmentTexture';
+export type { EnvironmentTextureLevel } from './EnvironmentTexture';
 export { RenderTargets } from './RenderTargets';
 export type { DrawBufferMode } from './RenderTargets';
 export { PostPasses } from './PostPasses';

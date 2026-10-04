@@ -50,6 +50,54 @@ export interface ViewerOptions {
    * bundled when imported, e.g. `loaders: [gltfLoader, objLoader]`.
    */
   loaders?: LoaderPlugin<any>[];
+  /**
+   * Image-based lighting from the start (see `ViewerApi.setEnvironment`). Loaded asynchronously; a
+   * failure is reported on the console and the default lighting stays.
+   */
+  environment?: EnvironmentSource;
+  /** Options for `environment`. */
+  environmentOptions?: EnvironmentOptions;
+}
+
+/**
+ * Linear RGB equirectangular (longitude / latitude) HDR pixels: 3 floats per pixel, rows from the
+ * top (sky, the image's up) to the bottom, the centre column looking towards -Z of the image.
+ */
+export interface EnvironmentImage {
+  width: number;
+  height: number;
+  data: Float32Array;
+}
+
+/**
+ * Light source for image-based lighting:
+ *  - `'studio'`: built-in neutral studio preset (generated in code);
+ *  - any other string: URL of a Radiance `.hdr` file;
+ *  - a `Blob` / `File`, `ArrayBuffer` or `Uint8Array` holding a Radiance `.hdr` file;
+ *  - raw `EnvironmentImage` pixels.
+ * Only Radiance RGBE `.hdr` is supported as a file format (no OpenEXR).
+ */
+export type EnvironmentSource = 'studio' | (string & {}) | Blob | ArrayBuffer | Uint8Array | EnvironmentImage;
+
+export interface EnvironmentOptions {
+  /** Relative brightness of the environment light (the image is auto-exposed). Default 1. */
+  intensity?: number;
+  /** Rotation of the environment about the world up axis, radians. Default 0. */
+  rotation?: number;
+  /**
+   * 0..1: how much of the camera-attached key light is kept on top of the environment. A little
+   * headlight keeps shapes readable from every side. Default 0.25.
+   */
+  keyLight?: number;
+}
+
+/** The active environment (`getEnvironment`, `environment` event). */
+export interface EnvironmentInfo {
+  /** 'studio', the file name / last URL segment, or 'environment' for bytes and raw pixels. */
+  name: string;
+  intensity: number;
+  rotation: number;
+  keyLight: number;
 }
 
 export interface GeometryData {
@@ -161,6 +209,8 @@ export interface ViewerEvents {
   modelUnloaded: Model;
   /** Progress of a running `viewer.load()`. */
   loadProgress: ViewerLoadProgress;
+  /** The environment lighting changed (`null`: back to the default lighting). */
+  environment: EnvironmentInfo | null;
 }
 
 export interface ViewerLoadProgress {
@@ -286,6 +336,18 @@ export interface ViewerApi {
   /** GPU pick at canvas CSS-pixel coordinates. */
   pick(x: number, y: number): Promise<PickResult | null>;
   setSectionPlanes(planes: SectionPlane[]): void;
+  /**
+   * Image-based lighting: lights the scene with an HDR environment image (diffuse from its
+   * irradiance, reflections from the image blurred by roughness) instead of the default
+   * hemisphere light; `null` returns to the default lighting. The image is auto-exposed, so
+   * `intensity` is relative. Resolves once the new lighting is in place; rejects for an unreadable
+   * source (only Radiance `.hdr` files are supported). A later call supersedes one still loading
+   * (the earlier promise then resolves without applying anything). Calling it again with the same
+   * source object / string only changes the options, without reloading the image.
+   */
+  setEnvironment(source: EnvironmentSource | null, options?: EnvironmentOptions): Promise<void>;
+  /** The active environment, or null for the default lighting. */
+  getEnvironment(): EnvironmentInfo | null;
 
   // --- lifecycle ---
   on<K extends keyof ViewerEvents>(event: K, handler: (payload: ViewerEvents[K]) => void): () => void;

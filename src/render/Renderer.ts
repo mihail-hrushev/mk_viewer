@@ -24,7 +24,8 @@
  * What restarts the image vs. what appends
  *  - restart: camera/projection/viewport change, near/far change, any change of existing fragment
  *    records that affects geometry passes (transform, visibility, colour, ghosting, material),
- *    removal, section planes, background, context restore, `invalidateImage()`.
+ *    removal, section planes, background, environment (image or options), context restore,
+ *    `invalidateImage()`.
  *  - present only (`invalidatePresent()`): selection / hover flags. They are a screen-space overlay
  *    (tint + outline from the id target and the fragment flags, COMPOSITE_FS) composited when the
  *    accumulated image is presented, so a flag change costs the fragment texture row upload and one
@@ -40,6 +41,7 @@ import type { ViewerStats } from '../types';
 import { DETAIL_STEPS, DrawList, ITEM_FREE, ITEM_INSTANCED, type CullView, type Scene } from '../core';
 import {
   DrawSubmitter,
+  EnvironmentTexture,
   GpuTimer,
   PixelReader,
   PostPasses,
@@ -47,9 +49,11 @@ import {
   UberProgram,
   UBER_FRAG_TEX_UNIT,
   UBER_MAT_TEX_UNIT,
+  UBER_ENV_TEX_UNIT,
   applyPassState,
   planesToViewSpace,
   unprojectDepth,
+  type EnvironmentUniforms,
   type GlContext,
   type OverlayStyle,
   type UberPass,
@@ -60,6 +64,16 @@ import { MAX_SECTION_PLANES } from '../layout';
 import { BudgetController } from './BudgetController';
 import { GpuScene, type VaoSlot } from './GpuScene';
 import { SliceGrouper } from './SliceGrouper';
+import type { PreparedEnvironment } from './environment';
+
+/** Environment lighting settings (validated by the Viewer). */
+export interface RenderEnvironmentOptions {
+  intensity: number;
+  /** Radians about the world up axis. */
+  rotation: number;
+  /** 0..1 */
+  keyLight: number;
+}
 
 export interface RendererOptions {
   frameBudgetMs: number;
@@ -156,6 +170,9 @@ export class Renderer {
   private readonly gl: WebGL2RenderingContext;
   private readonly uber: UberProgram;
   private uberSection: UberProgram | null = null;
+  /** Environment-lighting variants, created when an environment is first set. */
+  private uberEnv: UberProgram | null = null;
+  private uberEnvSection: UberProgram | null = null;
   private prog: UberProgram;
   private readonly post: PostPasses;
   private readonly reader: PixelReader;
@@ -228,6 +245,15 @@ export class Renderer {
   private background: [Float32Array, Float32Array];
   private readonly overlayScratch: OverlayStyle = { selectionTint: [], highlightTint: [], outlineColor: [], outlineWidth: 0 };
 
+  // image-based lighting
+  private readonly envTex: EnvironmentTexture;
+  private envUniforms: EnvironmentUniforms | null = null;
+  private envPrepared: PreparedEnvironment | null = null;
+  /** World -> environment-local rotation, row-major 3x3 (up axis mapping and `rotation`). */
+  private readonly envWorld = new Float64Array(9);
+  /** View -> environment-local, column-major (u_envMatrix). */
+  private readonly envView = new Float32Array(9);
+
   constructor(
     private readonly ctx: GlContext,
     private readonly scene: Scene,
@@ -244,6 +270,7 @@ export class Renderer {
     this.reader = new PixelReader(ctx);
     this.timer = new GpuTimer(ctx);
     this.submitter = new DrawSubmitter(ctx);
+    this.envTex = new EnvironmentTexture(ctx);
     this.budget = new BudgetController({ targetMs: opts.frameBudgetMs });
     this.background = [Float32Array.from(opts.background[0]), Float32Array.from(opts.background[1])];
     // near plane from visible content: distant sub-pixel content must not push it out
@@ -305,8 +332,67 @@ export class Renderer {
     this.sectionWorld.fill(0);
     for (let i = 0; i < n * 4; i++) this.sectionWorld[i] = planes[i];
     this.sectionCount = n;
-    if (n > 0 && !this.uberSection) this.uberSection = new UberProgram(this.ctx, { sectionPlanes: true });
+    if (n > 0) this.ensurePrograms();
     this.invalidateImage();
+  }
+
+  /**
+   * Image-based lighting: a prepared environment (src/render/environment.ts) and its options, or
+   * null for the default hemisphere + key light. Re-uploads only when the image changes; always
+   * restarts the progressive image.
+   */
+  setEnvironment(env: PreparedEnvironment | null, options: RenderEnvironmentOptions): void {
+    if (env !== this.envPrepared) {
+      this.envTex.setLevels(env ? env.levels : null);
+      this.envPrepared = env;
+    }
+    this.envUniforms = env
+      ? {
+          sh: env.sh,
+          lodScale: env.lodScale,
+          maxLod: env.levels.length - 1,
+          intensity: options.intensity,
+          keyLight: options.keyLight,
+        }
+      : null;
+    // world -> env-local: world up onto +Y (z-up: (x, y, z) -> (x, z, -y)), then the environment
+    // turned by `rotation` about up (sample direction rotated by -rotation)
+    const c = Math.cos(options.rotation);
+    const s = Math.sin(options.rotation);
+    const m = this.envWorld;
+    // R_y(-rotation) rows: [c, 0, -s], [0, 1, 0], [s, 0, c]
+    if (this.opts.up === 'z') {
+      m.set([c, s, 0, 0, 0, 1, s, -c, 0]);
+    } else {
+      m.set([c, 0, -s, 0, 1, 0, s, 0, c]);
+    }
+    this.ensurePrograms();
+    this.uberEnv?.setEnvironment(this.envUniforms);
+    this.uberEnvSection?.setEnvironment(this.envUniforms);
+    this.invalidateImage();
+  }
+
+  /** Compiles the program variants the current settings need (outside the frame loop). */
+  private ensurePrograms(): void {
+    const sec = this.sectionCount > 0;
+    const env = this.envUniforms !== null;
+    if (sec && !env && !this.uberSection) this.uberSection = new UberProgram(this.ctx, { sectionPlanes: true });
+    if (env && !sec && !this.uberEnv) {
+      this.uberEnv = new UberProgram(this.ctx, { environment: true });
+      this.uberEnv.setEnvironment(this.envUniforms);
+    }
+    if (env && sec && !this.uberEnvSection) {
+      this.uberEnvSection = new UberProgram(this.ctx, { sectionPlanes: true, environment: true });
+      this.uberEnvSection.setEnvironment(this.envUniforms);
+    }
+  }
+
+  /** The program variant for the current settings. */
+  private selectProgram(): UberProgram {
+    this.ensurePrograms();
+    const sec = this.sectionCount > 0;
+    if (this.envUniforms) return sec ? this.uberEnvSection! : this.uberEnv!;
+    return sec ? this.uberSection! : this.uber;
   }
 
   /** GPU pick at CSS pixel coordinates relative to the canvas. */
@@ -351,10 +437,13 @@ export class Renderer {
     this.gpu.dispose();
     this.uber.dispose();
     this.uberSection?.dispose();
+    this.uberEnv?.dispose();
+    this.uberEnvSection?.dispose();
     this.targets.dispose();
     this.post.dispose();
     this.reader.dispose();
     this.timer.dispose();
+    this.envTex.dispose();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -597,13 +686,25 @@ export class Renderer {
     }
 
     // per-image uniforms
-    const prog = this.sectionCount > 0 && this.uberSection ? this.uberSection : this.uber;
+    const prog = this.selectProgram();
     this.prog = prog;
     const view = cam.view;
     prog.setCamera(view, cam.projection, cam.orthographic);
     if (this.opts.up === 'z') prog.setUpView(view[8], view[9], view[10]);
     else prog.setUpView(view[4], view[5], view[6]);
-    if (prog === this.uberSection) {
+    if (this.envUniforms) {
+      // u_envMatrix = envWorld * viewToWorld; viewToWorld(k, c) = view[k * 4 + c] (transpose of the
+      // rotation part of the column-major view matrix)
+      const w = this.envWorld;
+      const ev = this.envView;
+      for (let r = 0; r < 3; r++) {
+        for (let col = 0; col < 3; col++) {
+          ev[col * 3 + r] = w[r * 3] * view[col] + w[r * 3 + 1] * view[4 + col] + w[r * 3 + 2] * view[8 + col];
+        }
+      }
+      prog.setEnvMatrix(ev);
+    }
+    if (prog.hasSectionPlanes) {
       planesToViewSpace(this.sectionWorld, this.sectionCount, cam.view64, this.sectionView);
       prog.setSectionPlanes(this.sectionView, this.sectionCount);
     }
@@ -735,6 +836,7 @@ export class Renderer {
     this.targets.bind();
     this.gpu.fragTex.bind(UBER_FRAG_TEX_UNIT);
     this.gpu.matTex.bind(UBER_MAT_TEX_UNIT);
+    if (this.envUniforms) this.envTex.bind(UBER_ENV_TEX_UNIT);
   }
 
   private setPass(pass: UberPass): void {

@@ -1,6 +1,7 @@
 /**
  * Typed wrapper around the uber-shader Program: cached uniform locations, pass presets and frame
- * uniforms. One instance per variant (with / without section planes).
+ * uniforms. One instance per variant (with / without section planes, with / without environment
+ * lighting).
  */
 import { FragFlags, MAX_SECTION_PLANES } from '../layout';
 import type { GlContext } from './GlContext';
@@ -10,7 +11,22 @@ import { MaterialFilter, PassKind, uberFragmentSource, uberVertexSource } from '
 /** Texture units the uber program samples from. */
 export const UBER_FRAG_TEX_UNIT = 0;
 export const UBER_MAT_TEX_UNIT = 1;
+/** Environment map (EnvironmentTexture). Units 0..2 are also used by the post passes. */
+export const UBER_ENV_TEX_UNIT = 3;
 
+/** Image-based lighting uniforms (see EnvironmentTexture, src/render/environment.ts). */
+export interface EnvironmentUniforms {
+  /** 27 floats, pre-multiplied irradiance / pi SH (environment-local frame), before `intensity`. */
+  sh: Float32Array;
+  /** Mip selection: lod = log2(roughness^2 * lodScale). */
+  lodScale: number;
+  /** Highest mip level. */
+  maxLod: number;
+  /** Multiplies diffuse and specular environment light. */
+  intensity: number;
+  /** Fraction of the camera-attached key light kept (0..1). */
+  keyLight: number;
+}
 export interface LightingParams {
   /** View space, towards the light (normalized on set). */
   keyLightDir: [number, number, number];
@@ -40,6 +56,7 @@ export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost';
 export class UberProgram {
   readonly program: Program;
   readonly hasSectionPlanes: boolean;
+  readonly hasEnvironment: boolean;
   private readonly sectionScratch = new Float32Array(MAX_SECTION_PLANES * 4);
 
   private uFlagMask: WebGLUniformLocation | null = null;
@@ -54,20 +71,25 @@ export class UberProgram {
   private readonly upView = new Float32Array([0, 1, 0]);
   private readonly ghost = new Float32Array([0.6, 0.65, 0.7, 0.12]);
   private sectionCount = 0;
+  private env: EnvironmentUniforms | null = null;
+  private readonly envSh = new Float32Array(27);
+  private readonly envMatrix = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
   constructor(
     private readonly ctx: GlContext,
-    options: { sectionPlanes?: boolean } = {},
+    options: { sectionPlanes?: boolean; environment?: boolean } = {},
   ) {
     this.hasSectionPlanes = !!options.sectionPlanes;
+    this.hasEnvironment = !!options.environment;
     this.program = new Program(
       ctx,
       uberVertexSource(),
-      uberFragmentSource({ sectionPlanes: this.hasSectionPlanes }),
-      this.hasSectionPlanes ? 'uber+section' : 'uber',
+      uberFragmentSource({ sectionPlanes: this.hasSectionPlanes, environment: this.hasEnvironment }),
+      'uber' + (this.hasSectionPlanes ? '+section' : '') + (this.hasEnvironment ? '+env' : ''),
     );
     this.program.setSampler('u_fragTex', UBER_FRAG_TEX_UNIT);
     this.program.setSampler('u_matTex', UBER_MAT_TEX_UNIT);
+    if (this.hasEnvironment) this.program.setSampler('u_envTex', UBER_ENV_TEX_UNIT);
     this.applyPersistent();
     // Program.restore() runs before 'restored' listeners, so uniforms can be re-applied here.
     this.offRestored = ctx.on('restored', () => this.applyPersistent());
@@ -87,7 +109,34 @@ export class UberProgram {
     this.program.setVec4('u_ghostColor', this.ghost[0], this.ghost[1], this.ghost[2], this.ghost[3]);
     this.setOrthographic(false);
     if (this.hasSectionPlanes) this.setSectionPlanes(this.sectionScratch, this.sectionCount);
+    if (this.hasEnvironment) {
+      this.setEnvironment(this.env);
+      this.setEnvMatrix(this.envMatrix);
+    }
     this.setPass('opaque');
+  }
+
+  /**
+   * Image-based lighting uniforms (environment variant only; ignored otherwise). The environment
+   * texture itself is bound by the caller on UBER_ENV_TEX_UNIT.
+   */
+  setEnvironment(e: EnvironmentUniforms | null): void {
+    if (!this.hasEnvironment) return;
+    this.env = e;
+    if (!e) return;
+    this.program.use();
+    const s = this.envSh;
+    for (let i = 0; i < 27; i++) s[i] = e.sh[i] * e.intensity;
+    this.program.setVec3v('u_envSH', s);
+    this.program.setVec4('u_envParams', e.lodScale, e.maxLod, e.intensity, e.keyLight);
+  }
+
+  /** View space -> environment-local rotation (column-major 3x3). Set per image while an environment is on. */
+  setEnvMatrix(m: Float32Array): void {
+    if (!this.hasEnvironment) return;
+    if (m !== this.envMatrix) this.envMatrix.set(m);
+    this.program.use();
+    this.program.setMat3('u_envMatrix', this.envMatrix);
   }
 
   /** Binds the program. */

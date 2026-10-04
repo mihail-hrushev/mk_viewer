@@ -51,6 +51,14 @@ scale/offset is copied into each fragment record.
 **Materials** live in a data texture; one uber-shader handles all of them, so there are no
 per-material state changes. Only opaque vs transparent matters for pass ordering.
 
+**Lighting** is computed in view space: a camera-attached key light plus a sky / ground hemisphere.
+Optional image-based lighting (`setEnvironment`) is a compile-time variant of the uber-shader
+(`ENVIRONMENT`, so the default program stays bit-identical). It uses SH irradiance for diffuse and
+an RGBA16F equirect map with a CPU-built, solid-angle-weighted mip chain (`EnvironmentTexture`,
+sampled with `textureLod` by roughness) for specular. A per-image `u_envMatrix` maps view space to
+the environment frame (world up -> +Y, plus `rotation`). The CPU side (`src/render/environment.ts`:
+.hdr parser, `studio` preset, preparation) is pure and unit-tested.
+
 ## Consolidation: how draw calls stay low
 
 Two drawing paths, same shader (fragment index arrives as a per-vertex or a per-instance attribute):

@@ -7,7 +7,8 @@
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
  *
  * URL parameters: url=<comma-separated URLs>, offset=<x shift between URL models, default 0>,
- * up=y|z (scene up axis, default z).
+ * up=y|z (scene up axis, default z), env=studio|<URL of a Radiance .hdr> (image-based lighting; a
+ * .hdr file can also be opened or dropped like a model).
  */
 import { Viewer, createViewerUi, gltfLoader, objLoader } from '../src/index';
 import { expose, showStats } from './shared';
@@ -31,6 +32,10 @@ const offset = Number(params.get('offset') ?? 0);
       if (e?.name !== 'AbortError') ui.models.showError(`${url}: ${e?.message ?? e}`);
     });
 });
+
+// ?env=studio (built-in preset) or ?env=/path/to/sky.hdr: light the scene with an HDR environment
+const env = params.get('env');
+if (env) viewer.setEnvironment(env).catch((e) => ui.models.showError(`${env}: ${e?.message ?? e}`));
 
 // --- the page's own content goes in the Models panel footer ----------------------------------------
 const picked = document.createElement('div');

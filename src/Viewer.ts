@@ -38,6 +38,9 @@
 import type {
   CameraState,
   Color,
+  EnvironmentInfo,
+  EnvironmentOptions,
+  EnvironmentSource,
   GeometryData,
   GeometryId,
   Mat4,
@@ -68,6 +71,7 @@ import { Camera, CameraTransition, OrbitControls } from './camera';
 import * as prim from './primitives';
 import { Renderer, type RenderHost } from './render/Renderer';
 import { foldTransform, needsRecentre, positionsBounds, shiftPositions, transformedCenter } from './render/origin';
+import { prepareEnvironment, readEnvironmentSource, type PreparedEnvironment } from './render/environment';
 
 const DEFAULT_BACKGROUND: [Color, Color] = [
   [0.86, 0.89, 0.92],
@@ -167,8 +171,16 @@ export class Viewer implements ViewerApi {
     modelLoaded: new Set(),
     modelUnloaded: new Set(),
     loadProgress: new Set(),
+    environment: new Set(),
   };
   private lastCamera: CameraState | null = null;
+
+  // image-based lighting: the latest setEnvironment call wins (token), the prepared image is reused
+  // while the source stays the same
+  private envToken = 0;
+  private envSource: EnvironmentSource | null = null;
+  private envPrepared: PreparedEnvironment | null = null;
+  private envInfo: EnvironmentInfo | null = null;
 
   // pointer / hover
   private hoverInFlight = false;
@@ -250,6 +262,11 @@ export class Viewer implements ViewerApi {
     this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
     this.resizeObserver?.observe(canvas);
     this.resize();
+    if (options.environment != null) {
+      this.setEnvironment(options.environment, options.environmentOptions).catch((e) =>
+        console.error('mk-viewer: the environment could not be loaded', e),
+      );
+    }
   }
 
   get stats(): ViewerStats {
@@ -768,6 +785,42 @@ export class Viewer implements ViewerApi {
     this.applySectionPlanes();
   }
 
+  async setEnvironment(source: EnvironmentSource | null, options: EnvironmentOptions = {}): Promise<void> {
+    if (this.disposed) return;
+    const token = ++this.envToken;
+    const opts = environmentOptions(options);
+    if (source === null) {
+      this.envSource = null;
+      this.envPrepared = null;
+      this.renderer.setEnvironment(null, opts);
+      this.envInfo = null;
+      this.emit('environment', null);
+      return;
+    }
+    let prepared = this.envPrepared;
+    let name = this.envInfo?.name ?? 'environment';
+    if (!prepared || source !== this.envSource) {
+      try {
+        const r = await readEnvironmentSource(source);
+        if (token !== this.envToken || this.disposed) return;
+        prepared = prepareEnvironment(r.pixels);
+        name = r.name;
+      } catch (e) {
+        if (token !== this.envToken || this.disposed) return; // superseded: nothing to report
+        throw e;
+      }
+    }
+    this.envSource = source;
+    this.envPrepared = prepared;
+    this.renderer.setEnvironment(prepared, opts);
+    this.envInfo = { name, ...opts };
+    this.emit('environment', { ...this.envInfo });
+  }
+
+  getEnvironment(): EnvironmentInfo | null {
+    return this.envInfo ? { ...this.envInfo } : null;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // lifecycle
 
@@ -1094,6 +1147,16 @@ function parseBackground(bg: ViewerOptions['background']): [number[], number[]] 
   }
   const c = b as Color;
   return [[c[0], c[1], c[2]], [c[0], c[1], c[2]]];
+}
+
+function environmentOptions(o: EnvironmentOptions): { intensity: number; rotation: number; keyLight: number } {
+  const intensity = o.intensity ?? 1;
+  const rotation = o.rotation ?? 0;
+  const keyLight = o.keyLight ?? 0.25;
+  if (!(Number.isFinite(intensity) && intensity >= 0)) throw new RangeError(`mk-viewer: invalid environment intensity ${intensity}`);
+  if (!Number.isFinite(rotation)) throw new RangeError(`mk-viewer: invalid environment rotation ${rotation}`);
+  if (!(keyLight >= 0 && keyLight <= 1)) throw new RangeError(`mk-viewer: environment keyLight must be in 0..1, got ${keyLight}`);
+  return { intensity, rotation, keyLight };
 }
 
 function sameVec(a: ArrayLike<number>, b: ArrayLike<number>): boolean {

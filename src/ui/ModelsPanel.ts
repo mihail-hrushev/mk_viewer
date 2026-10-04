@@ -2,6 +2,8 @@
  * Models panel: open model files (file picker, or drop them on the canvas), follow running loads,
  * and show / hide / fit / isolate / unload each loaded model. It lists every load of the viewer,
  * whoever started it. `footer` is free space for the host page (status text, statistics).
+ * A Radiance `.hdr` file among the opened / dropped files becomes the environment lighting
+ * (`viewer.setEnvironment`); the active environment is shown with a button to clear it.
  */
 import type { ViewerApi } from '../types';
 import type { LoadTask } from '../loaders/types';
@@ -21,6 +23,7 @@ export class ModelsPanel {
   private readonly loadsBox: HTMLElement;
   private readonly modelsBox: HTMLElement;
   private readonly errorsBox: HTMLElement;
+  private readonly envBox: HTMLElement;
   private readonly loads = new Map<LoadTask, RunningLoad>();
   private readonly unsubscribe: (() => void)[] = [];
 
@@ -40,8 +43,10 @@ export class ModelsPanel {
       input.value = '';
     };
     const open = this.button('Open files…', () => input.click());
-    open.title = 'Open model files (several at once to federate them); files can also be dropped on the viewer';
+    open.title =
+      'Open model files (several at once to federate them) or a .hdr environment image; files can also be dropped on the viewer';
     const top = this.row(open, input);
+    this.envBox = doc.createElement('div');
 
     this.loadsBox = doc.createElement('div');
     this.modelsBox = doc.createElement('div');
@@ -49,7 +54,7 @@ export class ModelsPanel {
     this.errorsBox.className = 'mkv-errors';
     this.footer = doc.createElement('div');
     this.footer.className = 'mkv-footer';
-    body.append(top, this.loadsBox, this.modelsBox, this.errorsBox, this.footer);
+    body.append(top, this.envBox, this.loadsBox, this.modelsBox, this.errorsBox, this.footer);
 
     const canvas = viewer.canvas;
     canvas.addEventListener('dragover', this.onDragOver);
@@ -63,8 +68,10 @@ export class ModelsPanel {
       }),
       viewer.on('modelLoaded', () => this.drawModels()),
       viewer.on('modelUnloaded', () => this.drawModels()),
+      viewer.on('environment', () => this.drawEnvironment()),
     );
     this.drawModels();
+    this.drawEnvironment();
   }
 
   get element(): HTMLElement {
@@ -87,11 +94,19 @@ export class ModelsPanel {
     this.panel.toggle();
   }
 
-  /** Loads the given files as models; `.bin` companions of a multi-file glTF are resolved by name. */
+  /**
+   * Loads the given files as models; `.bin` companions of a multi-file glTF are resolved by name. A
+   * `.hdr` file is set as the environment lighting instead.
+   */
   loadFiles(list: FileList | File[]): void {
     const files = Array.from(list);
     for (const f of files) {
       if (/\.bin$/i.test(f.name)) continue;
+      if (/\.hdr$/i.test(f.name)) {
+        // the error message already names the file
+        this.viewer.setEnvironment(f).catch((e: { message?: string }) => this.showError(`${e?.message ?? e}`));
+        continue;
+      }
       const task = this.viewer.load(f, { resolve: (uri: string) => files.find((x) => x.name === uri.split('/').pop()) });
       task.catch((e: { name?: string; message?: string }) => {
         if (e?.name !== 'AbortError') this.showError(`${f.name}: ${e?.message ?? e}`);
@@ -153,6 +168,19 @@ export class ModelsPanel {
       rows.push(this.row(label, bar, this.button('Cancel', () => task.abort())));
     }
     this.loadsBox.replaceChildren(...rows);
+  }
+
+  private drawEnvironment(): void {
+    const env = this.viewer.getEnvironment();
+    if (!env) {
+      this.envBox.replaceChildren();
+      return;
+    }
+    const label = this.element.ownerDocument.createElement('span');
+    label.className = 'mkv-grow';
+    label.textContent = `Lighting: ${env.name}`;
+    label.title = 'Image-based lighting (environment)';
+    this.envBox.replaceChildren(this.row(label, this.button('Clear', () => void this.viewer.setEnvironment(null))));
   }
 
   private drawModels(): void {

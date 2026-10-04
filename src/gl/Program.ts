@@ -90,6 +90,9 @@ export class Program implements GlResource {
   setVec4v(name: string, v: Float32Array, count?: number): void {
     this.ctx.gl.uniform4fv(this.uniform(name), v, 0, (count ?? v.length >> 2) * 4);
   }
+  setMat3(name: string, m: Float32Array): void {
+    this.ctx.gl.uniformMatrix3fv(this.uniform(name), false, m);
+  }
   setMat4(name: string, m: Float32Array): void {
     this.ctx.gl.uniformMatrix4fv(this.uniform(name), false, m);
   }

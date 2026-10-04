@@ -258,6 +258,46 @@ Up to 6 planes. Geometry on the positive side of the normal is cut away (from
 viewer.setSectionPlanes([{ normal, point }]);
 ```
 
+### Environment lighting (HDR image as light source)
+
+By default the scene is lit by a camera-attached key light plus a sky / ground hemisphere. Instead,
+an HDR environment image can light it: diffuse light comes from the image's irradiance (9
+spherical-harmonic coefficients), and reflections show the image itself, blurred more the rougher
+the material. A little of the key light stays on top, so shapes read clearly from every side.
+
+```ts
+await viewer.setEnvironment('studio');                       // built-in preset
+await viewer.setEnvironment('/hdri/workshop_2k.hdr', { intensity: 1.2, rotation: Math.PI / 2 });
+await viewer.setEnvironment(file);                           // File / Blob / ArrayBuffer / Uint8Array
+await viewer.setEnvironment({ width, height, data });        // linear RGB Float32Array, equirect
+await viewer.setEnvironment(null);                           // back to the default lighting
+viewer.getEnvironment();                                     // { name, intensity, rotation, keyLight } | null
+viewer.on('environment', (info) => {});
+new Viewer(canvas, { environment: 'studio', environmentOptions: { keyLight: 0.3 } });
+```
+
+- Options: `intensity` (relative brightness, default 1), `rotation` (radians about the world up axis,
+  default 0), `keyLight` (0..1, share of the camera-attached key light kept, default 0.25).
+- Images are equirectangular (2:1 longitude / latitude) with the sky in the top rows. The sky ends
+  up overhead for both `up: 'y'` and `up: 'z'` scenes.
+- Every image is auto-exposed (its average irradiance is normalised), so very different HDR files
+  give a similar overall brightness and `intensity` is relative to that.
+- `'studio'` is generated in code: soft overhead and side softboxes, a bright upper hemisphere and a
+  darker floor, neutral grey. It is designed for BIM / CAD models: clear form shading and soft
+  highlights on metal, with no colour cast.
+- Only **Radiance `.hdr`** (RGBE, run-length encoded or flat) is supported as a file format. OpenEXR
+  is not; convert such files to `.hdr` first. No HDR image is bundled with the library. Free CC0
+  images are available from [Poly Haven](https://polyhaven.com/hdris) (download the `.hdr`
+  version; 1k or 2k is plenty, since the image is resampled to 512 x 256).
+- A later call replaces one that is still loading, and only the last call takes effect. A second
+  call with the same source object or string only changes the options, without reloading.
+- The Models panel of the built-in UI treats an opened or dropped `.hdr` file as the environment
+  and shows the active one with a Clear button. `examples/models.html?env=studio` (or
+  `?env=<url>`) sets one from the URL.
+- Cost: the image is resampled and prepared on the CPU once per image (tens of ms for a 2k file),
+  and uses about 1.4 MB of GPU memory (RGBA16F with mips). Shading adds one texture lookup and a
+  short polynomial per pixel. With no environment set, the default shader runs unchanged.
+
 ### Stats
 
 `viewer.stats` gives `fps`, `frameMs` (CPU), `gpuMs` (GPU time of the scene passes, when the browser
@@ -490,6 +530,10 @@ here was measured on a phone or tablet.
   While a heavy image is still being refined, small objects that are not drawn yet cannot be picked
   or hovered.
 - **No textures, lines or points.** Triangles with per-material colour only.
+- **Environment lighting is approximate.** Reflections come from a box-filtered mip pyramid picked
+  by roughness, not a GGX-prefiltered map, so blurred reflections are softer and less accurate in
+  lobe shape than in an offline renderer. Diffuse light is order-2 SH (smooth, no sharp sun shadows),
+  and there are no shadows or occlusion from the environment. Only Radiance `.hdr` files are read.
 - **Compressed glTF.** Draco and meshopt compressed glTF files need a decoder plugged into
   `createGltfLoader({ primitiveDecoders })`. None is bundled (zero dependencies). Without one, the load
   fails with an error that names the missing extension.
