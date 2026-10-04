@@ -9,6 +9,9 @@
  * Keyboard: W / S fly forward / backward along the view direction, A / D strafe left / right,
  * E / C move up / down along the world up axis (physical key positions, so any keyboard layout works); Shift moves faster. Keys act while the
  * pointer is over the element or the element has focus, and never while typing in a form field.
+ * Moving with the keys switches to first-person mode: a left drag then looks around from the eye
+ * instead of orbiting. Setting a pivot (double click / double tap) or the camera (fit, setCamera)
+ * returns to orbiting.
  *
  * The element gets `touch-action: none` and no text selection / touch callout, so the browser does
  * not scroll, zoom or open menus on it; pointers are captured so drags continue outside it.
@@ -77,6 +80,8 @@ const WHEEL_IDLE_MS = 150;
 
 const KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8, KEY_UP = 16, KEY_DOWN = 32;
 const SHIFT_MOVE_FACTOR = 4;
+/** Look-around turn rate relative to orbiting (a full-height drag turns by PI * LOOK_SPEED). */
+const LOOK_SPEED = 0.5;
 /** Longest frame time a key step is integrated over, so a stalled frame cannot jump the camera. */
 const MAX_MOVE_DT_MS = 100;
 
@@ -140,6 +145,11 @@ export class OrbitControls implements GestureSink {
   private moveKeys = 0;
   private moveFast = false;
   private moveFresh = false;
+  /**
+   * First-person mode: entered by moving with the keyboard, left when a pivot or camera is set
+   * (double click, fit, setCamera). While walking, a left drag looks around from the eye.
+   */
+  private walking = false;
   private pointerInside = false;
   private readonly prevStyles: string[] = [];
 
@@ -218,6 +228,7 @@ export class OrbitControls implements GestureSink {
 
   /** Moves the camera to `state` (missing fields keep current values), optionally animated. */
   setCamera(state: Partial<CameraState>, animate = false): void {
+    this.walking = false;
     if (animate && this.animationMs > 0) {
       this.transition.start(this.camera, state, this.animationMs);
     } else {
@@ -365,7 +376,13 @@ export class OrbitControls implements GestureSink {
   orbit(dx: number, dy: number): void {
     if (!this.enabled) return;
     const k = (Math.PI / this.viewHeight()) * this.rotateSpeed;
-    orbit(this.camera, -dx * k, dy * k, this.worldUp);
+    if (this.walking) {
+      // first-person look: turn the view about the eye, which stays where it is
+      const l = k * LOOK_SPEED;
+      orbit(this.camera, -dx * l, dy * l, this.worldUp, this.camera.eye);
+    } else {
+      orbit(this.camera, -dx * k, dy * k, this.worldUp);
+    }
   }
 
   /** @internal */
@@ -481,6 +498,7 @@ export class OrbitControls implements GestureSink {
     if ((this.moveKeys & bit) !== 0) return; // key repeat
     if (this.moveKeys === 0) this.moveFresh = true;
     this.moveKeys |= bit;
+    this.walking = true;
     this.startInteraction();
     this.requestFrame?.();
   };

@@ -363,6 +363,9 @@ left / right, `E` / `C` move it up / down along the world up axis; hold `Shift` 
 the orbit centre). The keys are read by physical position, so they work on any keyboard layout, and
 only while the pointer is over the canvas or the canvas has focus.
 
+Moving with the keys switches to first-person mode: a left drag then looks around from where the
+camera stands instead of orbiting. Double click an object (or fit the view) to orbit again.
+
 The canvas gets `touch-action: none`, so the page does not scroll or zoom under the viewer. Your page
 should still use a viewport meta tag and keep its own controls finger-sized (see
 `examples/shared.css`). `new Viewer(canvas, { controls: false })` turns the built-in controls off.
