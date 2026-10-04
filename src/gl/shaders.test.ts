@@ -23,7 +23,7 @@ import {
 } from '../layout';
 import { formatShaderError } from './Program';
 import { FULLSCREEN_VS, SHADER_RECORD_ASSUMPTIONS, assembleShader } from './shaders/common';
-import { BACKGROUND_FS, OUTLINE_FS, PICK_RESOLVE_FS, PRESENT_FS } from './shaders/post';
+import { BACKGROUND_FS, COMPOSITE_FS, OUTLINE_FS, PICK_RESOLVE_FS, PRESENT_FS } from './shaders/post';
 import { uberFragmentSource, uberVertexSource } from './shaders/uber';
 
 const ALL: Record<string, string> = {
@@ -34,6 +34,7 @@ const ALL: Record<string, string> = {
   present: PRESENT_FS,
   background: BACKGROUND_FS,
   outline: OUTLINE_FS,
+  composite: COMPOSITE_FS,
   pickResolve: PICK_RESOLVE_FS,
 };
 

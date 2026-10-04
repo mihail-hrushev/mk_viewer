@@ -23,8 +23,6 @@
  *   u_skyColor         vec3       linear hemisphere colour (up)
  *   u_groundColor      vec3       linear hemisphere colour (down)
  *   u_upView           vec3       world up expressed in view space (mat3(view) * up), unit
- *   u_selectionColor   vec4       linear rgb + blend amount
- *   u_highlightColor   vec4       linear rgb + blend amount
  *   u_ghostColor       vec4       linear rgb + opacity
  *   u_sectionPlaneCount int       (SECTION_PLANES variant only)
  *   u_sectionPlanes    vec4[MAX_SECTION_PLANES]  view space, discard where dot(xyz, p) + w > 0
@@ -137,8 +135,6 @@ uniform vec3 u_keyLightColor;
 uniform vec3 u_skyColor;
 uniform vec3 u_groundColor;
 uniform vec3 u_upView;
-uniform vec4 u_selectionColor;
-uniform vec4 u_highlightColor;
 uniform vec4 u_ghostColor;
 #ifdef SECTION_PLANES
 uniform int u_sectionPlaneCount;
@@ -225,8 +221,8 @@ void main() {
 
   vec3 color = direct + ambient + base * emissive;
 
-  if ((v_flags & FLAG_SELECTED) != 0u) color = mix(color, u_selectionColor.rgb, u_selectionColor.a);
-  if ((v_flags & FLAG_HIGHLIGHTED) != 0u) color = mix(color, u_highlightColor.rgb, u_highlightColor.a);
+  // Selection / hover tint is not applied here: it is a screen-space overlay composited at present
+  // time (COMPOSITE_FS), so changing it never restarts the progressive image.
 
   vec3 srgb = linearToSrgb(color);
   if (u_passKind == 1) {

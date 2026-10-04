@@ -4,7 +4,7 @@
  * Frame (requestAnimationFrame, idles completely when there is nothing to do):
  *   host.beforeFrame (controls / camera animation) -> scene.flush() -> GpuScene.sync (dirty texture
  *   rows, page mirroring) -> change detection -> traversal (when needed) -> draw a budgeted slice ->
- *   present (+ selection outline).
+ *   present (+ selection / hover overlay).
  *
  * Image lifecycle
  *  - Moving (camera changed this frame, animating or user interacting): every frame restarts the
@@ -23,8 +23,12 @@
  *
  * What restarts the image vs. what appends
  *  - restart: camera/projection/viewport change, near/far change, any change of existing fragment
- *    records (transform, visibility, colour, selection, hover, ghosting, material), removal,
- *    section planes, background, context restore, `invalidateImage()`.
+ *    records that affects geometry passes (transform, visibility, colour, ghosting, material),
+ *    removal, section planes, background, context restore, `invalidateImage()`.
+ *  - present only (`invalidatePresent()`): selection / hover flags. They are a screen-space overlay
+ *    (tint + outline from the id target and the fragment flags, COMPOSITE_FS) composited when the
+ *    accumulated image is presented, so a flag change costs the fragment texture row upload and one
+ *    fullscreen pass; the accumulated image is neither cleared nor redrawn.
  *  - append (`noteAppend()`, i.e. addMesh/addMeshes only): re-traverse and draw the new items into
  *    the existing image, unless the image already holds blended content or items were re-batched by
  *    compaction since the image started (stamps unreliable), in which case it restarts.
@@ -47,6 +51,7 @@ import {
   planesToViewSpace,
   unprojectDepth,
   type GlContext,
+  type OverlayStyle,
   type UberPass,
 } from '../gl';
 import type { Camera } from '../camera';
@@ -73,8 +78,10 @@ export interface RenderHost {
   readonly interacting: boolean;
   /** Number of ghosted fragments (0 skips the ghost pass entirely). */
   ghostCount(): number;
-  /** Number of selected objects (0 skips the outline pass). */
+  /** Number of selected objects (0 and no highlight: plain present without overlay). */
   readonly selectionCount: number;
+  /** An object is hover-highlighted (overlay needed even without selection). */
+  readonly highlightActive: boolean;
   /** The camera version changed in this frame (pose, projection, viewport or clip planes). */
   cameraChanged(): void;
   /** The progressive image is complete. */
@@ -99,7 +106,6 @@ const PHASE_MOVING_PARTIAL = 5;
 /** Work units charged per draw item on top of its triangles (draw call / state overhead). */
 export const ENTRY_OVERHEAD_UNITS = 300;
 
-const OUTLINE_COLOR = [1.0, 0.62, 0.1, 1.0];
 /** Frames after an upload larger than this are not used to correct the budget. */
 const UPLOAD_SKIP_BYTES = 4 * 1024 * 1024;
 
@@ -123,6 +129,22 @@ export class Renderer {
   frameCount = 0;
   /** Images started (diagnostics). */
   imageCount = 0;
+  /** Presents to the canvas, including present-only frames (diagnostics). */
+  presentCount = 0;
+  /** Frames that only re-presented the existing image for an overlay change (diagnostics). */
+  overlayOnlyFrames = 0;
+  /** Scene draw calls submitted since creation, all passes (diagnostics). */
+  drawCallsTotal = 0;
+  /**
+   * Selection / hover overlay. Tints are linear rgb + amount, the outline sRGB rgb + alpha.
+   * Call `invalidatePresent()` after changing it.
+   */
+  readonly overlay: OverlayStyle = {
+    selectionTint: [0.15, 0.45, 1.0, 0.45],
+    highlightTint: [1.0, 1.0, 1.0, 0.25],
+    outlineColor: [1.0, 0.62, 0.1, 1.0],
+    outlineWidth: 2,
+  };
   /** True while a frame is scheduled. */
   get scheduled(): boolean {
     return this.raf !== 0;
@@ -155,6 +177,7 @@ export class Renderer {
   private completeNotified = true;
   private listThreshold = -1;
   private invalid = true;
+  private presentPending = false;
   private appendPending = false;
   private compactPending = false;
   private drawnImage = new Uint32Array(256);
@@ -201,6 +224,7 @@ export class Renderer {
   private disposed = false;
   private readonly offRestored: () => void;
   private background: [Float32Array, Float32Array];
+  private readonly overlayScratch: OverlayStyle = { selectionTint: [], highlightTint: [], outlineColor: [], outlineWidth: 0 };
 
   constructor(
     private readonly ctx: GlContext,
@@ -239,6 +263,15 @@ export class Renderer {
   /** Restart the progressive image at the next frame. */
   invalidateImage(): void {
     this.invalid = true;
+    this.wake();
+  }
+
+  /**
+   * Re-present the current image at the next frame without redrawing it (selection / hover flags
+   * changed). Frames are only scheduled for this one present; the loop idles again afterwards.
+   */
+  invalidatePresent(): void {
+    this.presentPending = true;
     this.wake();
   }
 
@@ -426,6 +459,10 @@ export class Renderer {
     if (drew) {
       this.present();
       this.frameCount++;
+      this.drawCallsTotal += this.submitter.drawCalls;
+    } else if (this.presentPending) {
+      this.present(); // overlay flags changed: same image, new composite
+      this.overlayOnlyFrames++;
     }
     const cpuMs = performance.now() - t0;
 
@@ -944,16 +981,27 @@ export class Renderer {
   private present(): void {
     const gl = this.gl;
     const s = this.ctx.state;
+    this.presentPending = false;
+    this.presentCount++;
     s.bindFramebuffer(null);
     s.setViewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     s.setDepthTest(false);
     s.setBlend(false);
-    this.post.drawPresent(this.targets.colorTex!);
-    if (this.host.selectionCount > 0) {
-      s.setBlend(true);
-      s.setBlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      this.post.drawOutline(this.targets.idTex!, this.gpu.fragTex.texture, OUTLINE_COLOR, 2);
-      s.setBlend(false);
+    const t = this.targets;
+    const sel = this.host.selectionCount > 0;
+    if (sel || this.host.highlightActive) {
+      // outline width is in target pixels: scale with the device pixel ratio
+      const canvas = this.ctx.canvas as HTMLCanvasElement;
+      const dpr = t.height / (canvas.clientHeight || t.height);
+      const o = this.overlay;
+      const width = sel && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * (dpr > 0 ? dpr : 1))) : 0;
+      this.overlayScratch.selectionTint = o.selectionTint;
+      this.overlayScratch.highlightTint = o.highlightTint;
+      this.overlayScratch.outlineColor = o.outlineColor;
+      this.overlayScratch.outlineWidth = width;
+      this.post.drawComposite(t.colorTex!, t.idTex!, this.gpu.fragTex.texture, this.overlayScratch);
+    } else {
+      this.post.drawPresent(t.colorTex!);
     }
   }
 }

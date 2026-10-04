@@ -44,8 +44,6 @@ export class UberProgram {
   // Persistent settings, re-applied after a context restore.
   private lighting: LightingParams = DEFAULT_LIGHTING;
   private readonly upView = new Float32Array([0, 1, 0]);
-  private readonly selection = new Float32Array([0.15, 0.45, 1.0, 0.45]);
-  private readonly highlight = new Float32Array([1.0, 1.0, 1.0, 0.25]);
   private readonly ghost = new Float32Array([0.6, 0.65, 0.7, 0.12]);
   private sectionCount = 0;
 
@@ -78,8 +76,6 @@ export class UberProgram {
     this.program.use();
     this.setLighting(this.lighting);
     this.setUpView(this.upView[0], this.upView[1], this.upView[2]);
-    this.program.setVec4('u_selectionColor', this.selection[0], this.selection[1], this.selection[2], this.selection[3]);
-    this.program.setVec4('u_highlightColor', this.highlight[0], this.highlight[1], this.highlight[2], this.highlight[3]);
     this.program.setVec4('u_ghostColor', this.ghost[0], this.ghost[1], this.ghost[2], this.ghost[3]);
     this.setOrthographic(false);
     if (this.hasSectionPlanes) this.setSectionPlanes(this.sectionScratch, this.sectionCount);
@@ -126,17 +122,6 @@ export class UberProgram {
     this.program.setVec3('u_groundColor', p.groundColor[0], p.groundColor[1], p.groundColor[2]);
   }
 
-  /** Linear rgb + blend amount. */
-  setSelectionColor(r: number, g: number, b: number, amount: number): void {
-    this.selection.set([r, g, b, amount]);
-    this.program.use();
-    this.program.setVec4('u_selectionColor', r, g, b, amount);
-  }
-  setHighlightColor(r: number, g: number, b: number, amount: number): void {
-    this.highlight.set([r, g, b, amount]);
-    this.program.use();
-    this.program.setVec4('u_highlightColor', r, g, b, amount);
-  }
   /** Linear rgb + opacity. */
   setGhostColor(r: number, g: number, b: number, opacity: number): void {
     this.ghost.set([r, g, b, opacity]);

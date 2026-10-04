@@ -138,6 +138,8 @@ export class Viewer implements ViewerApi {
             pickPivot: (x, y) => this.renderer.pick(x, y).then((r) => (r ? r.position : null)),
             onInteractionStart: () => this.renderer.wake(),
             onInteractionEnd: () => this.renderer.wake(),
+            onTap: (x, y, _type, toggle) => this.selectAt(x, y, toggle),
+            requestFrame: () => this.renderer.wake(),
           });
 
     const [top, bottom] = parseBackground(options.background);
@@ -150,6 +152,9 @@ export class Viewer implements ViewerApi {
       ghostCount: () => this.ghostCount(),
       get selectionCount() {
         return self.selectionCount;
+      },
+      get highlightActive() {
+        return self.autoSelect && self.hoverObject !== null;
       },
       cameraChanged: () => this.cameraChanged(),
       frameComplete: () => this.emit('frameComplete', this.renderer.stats),
@@ -164,7 +169,10 @@ export class Viewer implements ViewerApi {
 
     this.primitives = this.makePrimitives();
 
-    canvas.addEventListener('click', this.onClick);
+    // With controls, clicks / taps come from their gesture recognizer (pointer events), which
+    // classifies touch taps properly and never double-reports with the compatibility `click`.
+    if (!this.controls) canvas.addEventListener('click', this.onClick);
+    canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
@@ -322,7 +330,8 @@ export class Viewer implements ViewerApi {
   select(objectIds: ArrayLike<number>): void {
     this.scene.select(objectIds);
     this.selectionCount = objectIds.length;
-    this.renderer.invalidateImage();
+    // selection tint + outline are composited at present time: no redraw of the scene
+    this.renderer.invalidatePresent();
     this.emit('selection', this.scene.getSelection());
   }
 
@@ -438,6 +447,7 @@ export class Viewer implements ViewerApi {
     this.disposed = true;
     const c = this.canvas;
     c.removeEventListener('click', this.onClick);
+    c.removeEventListener('pointerdown', this.onPointerDown);
     c.removeEventListener('pointermove', this.onPointerMove);
     c.removeEventListener('pointerleave', this.onPointerLeave);
     this.resizeObserver?.disconnect();
@@ -582,12 +592,18 @@ export class Viewer implements ViewerApi {
 
   // --- pointer: click selection, hover highlight -------------------------------------------------
 
+  /** Only used without built-in controls. */
   private readonly onClick = (e: MouseEvent): void => {
-    if (e.button !== 0 || this.controls?.dragged) return;
+    if (e.button !== 0) return;
+    this.selectAt(e.offsetX, e.offsetY, e.ctrlKey || e.metaKey || e.shiftKey);
+  };
+
+  /** Click / tap at CSS pixel (x, y): emits `pick` and updates the selection (autoSelect). */
+  private selectAt(x: number, y: number, toggle: boolean): void {
+    if (this.disposed) return;
     const wantPick = this.listeners.pick.size > 0;
     if (!this.autoSelect && !wantPick) return;
-    const toggle = e.ctrlKey || e.metaKey || e.shiftKey;
-    this.pick(e.offsetX, e.offsetY).then((r) => {
+    this.pick(x, y).then((r) => {
       if (this.disposed) return;
       this.emit('pick', r);
       if (!this.autoSelect) return;
@@ -605,9 +621,17 @@ export class Viewer implements ViewerApi {
         this.select([r.objectId]);
       }
     });
+  }
+
+  /** Hover is for mouse / pen: a touch clears it and suppresses hover picks until it moves away. */
+  private readonly onPointerDown = (e: PointerEvent): void => {
+    if (e.pointerType !== 'touch') return;
+    this.hoverInside = false; // also drops the result of a hover pick in flight
+    this.setHover(null);
   };
 
   private readonly onPointerMove = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') return;
     if (!this.autoSelect && this.listeners.hover.size === 0) return;
     this.hoverInside = true;
     if (e.buttons !== 0 || this.controls?.interacting) return;
@@ -645,7 +669,7 @@ export class Viewer implements ViewerApi {
     this.hoverObject = id;
     if (this.autoSelect) {
       this.scene.setHighlighted(id);
-      this.renderer.invalidateImage();
+      this.renderer.invalidatePresent();
     }
     this.emit('hover', r);
   }

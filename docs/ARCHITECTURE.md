@@ -98,9 +98,12 @@ what makes accumulation across frames possible.
 ## Picking and overlays
 
 The id attachment stores fragment index + 1. `pick()` reads one pixel asynchronously (PBO +
-`fenceSync`) plus depth to reconstruct the world position; no CPU raycast. Selection/hover tint and
-ghosting are flag bits in the fragment record evaluated in the shader; selection outline is a
-post-pass over the id buffer. Section planes are uniforms (max `MAX_SECTION_PLANES`) with
+`fenceSync`) plus depth to reconstruct the world position; no CPU raycast. Selection, hover and
+ghosting are flag bits in the fragment record. Ghosting is evaluated in the scene shader (changing it
+restarts the image). Selection/hover tint and the selection outline are a screen-space overlay
+composited at present time from the id buffer + fragment flags, so changing them uploads the texture
+row and re-presents the accumulated image without clearing or redrawing it; only pickable,
+non-ghosted fragments already in the id buffer are tinted. Section planes are uniforms (max `MAX_SECTION_PLANES`) with
 `discard` in the fragment shader. Transparent materials and ghosted fragments draw in a second,
 blended pass that does not write ids for ghosted fragments.
 

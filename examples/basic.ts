@@ -3,6 +3,12 @@
  *
  *   npx vite  ->  http://localhost:5173/examples/basic.html
  *
+ * Testing on a tablet / phone on the same network:
+ *   npx vite --host  ->  Vite prints a "Network:" URL, e.g. http://192.168.1.23:5173/ ; open
+ *   <that URL>examples/basic.html on the device (the PC firewall must allow inbound TCP 5173).
+ *   Touch: one finger orbits, two fingers pinch-zoom / pan, tap selects, tap on background clears
+ *   the selection, double tap sets the orbit pivot.
+ *
  * URL parameters
  *   scene=basic|big     basic: primitives, merged + instanced paths, transparency (default)
  *                       big: n1 instanced boxes + n2 unique meshes (defaults 1,000,000 / 100,000)

@@ -1,9 +1,14 @@
 /**
- * Pointer-event orbit/pan/zoom controls. DOM wiring only; the maths lives in orbitMath.ts.
+ * Pointer-event orbit/pan/zoom controls. DOM wiring only: gesture recognition (drag vs tap,
+ * finger transitions) lives in gestures.ts, camera maths in orbitMath.ts.
  *
- * Mouse: left drag orbits around the camera target, right/middle drag or shift+left pans, wheel
- * zooms toward the cursor, double click sets the pivot through `pickPivot`.
- * Touch: one finger orbits, two fingers pinch-zoom and pan, double tap sets the pivot.
+ * Mouse / pen: left drag orbits around the camera target, right/middle drag or shift+left pans,
+ * wheel zooms toward the cursor, double click sets the pivot through `pickPivot`.
+ * Touch: one finger orbits, two fingers pinch-zoom about their midpoint and pan (no twist),
+ * double tap sets the pivot. A click / tap (no drag) is reported through `onTap`.
+ *
+ * The element gets `touch-action: none` and no text selection / touch callout, so the browser does
+ * not scroll, zoom or open menus on it; pointers are captured so drags continue outside it.
  *
  * The owner calls `update(dtMs)` every frame; there is no internal animation loop.
  * Event handlers do not allocate.
@@ -13,7 +18,8 @@ import type { ReadArray } from '../math/common';
 import * as aabb from '../math/aabb';
 import * as vec3 from '../math/vec3';
 import type { Camera } from './Camera';
-import { CameraTransition, orbit, pan, worldUpVector, zoomAt } from './orbitMath';
+import { CameraTransition, orbit, pan, twoFingerStep, worldUpVector, zoomAt } from './orbitMath';
+import { GestureMode, GestureRecognizer, TapKind, pointerKindOf, type GestureOptions, type GestureSink } from './gestures';
 
 export interface OrbitControlsOptions {
   /** World up axis for turntable orbiting. Default 'y'. */
@@ -42,23 +48,37 @@ export interface OrbitControlsOptions {
   onInteractionStart?: () => void;
   /** Called when the interaction ends (all pointers up, wheel idle for ~150 ms). */
   onInteractionEnd?: () => void;
+  /**
+   * Called for a click / tap that was not a drag (primary button, within the tap slop and, for
+   * touch, the max tap duration), at CSS pixel (x, y) of the press. `toggle` is true when ctrl,
+   * meta or shift was held. The second tap of a double tap is not reported (it sets the pivot).
+   * Reported even while `enabled` is false.
+   */
+  onTap?: (x: number, y: number, pointerType: string, toggle: boolean) => void;
+  /** Tap / double-tap tolerances (see GestureOptions). */
+  gestures?: GestureOptions;
+  /**
+   * Called when the controls changed the camera outside of an input event or `update()` call
+   * (the pivot transition started by an asynchronous double-click / double-tap pick), so the
+   * owner's frame loop can be woken.
+   */
+  requestFrame?: () => void;
 }
 
-const enum Mode {
-  None = 0,
-  Orbit = 1,
-  Pan = 2,
-  Touch2 = 3,
-}
-
-const CLICK_TOLERANCE_PX = 4;
-const DOUBLE_TAP_MS = 300;
-const DOUBLE_TAP_PX = 20;
 const WHEEL_IDLE_MS = 150;
+
+/** Inline styles set on the element (and restored on dispose). */
+const ELEMENT_STYLES: [string, string][] = [
+  ['touch-action', 'none'],
+  ['user-select', 'none'],
+  ['-webkit-user-select', 'none'],
+  ['-webkit-touch-callout', 'none'],
+  ['-webkit-tap-highlight-color', 'transparent'],
+];
 
 const sPoint = new Float64Array(3);
 
-export class OrbitControls {
+export class OrbitControls implements GestureSink {
   readonly camera: Camera;
   readonly element: HTMLElement;
   /** When false all input is ignored. */
@@ -72,30 +92,19 @@ export class OrbitControls {
   pickPivot: OrbitControlsOptions['pickPivot'];
   onInteractionStart: (() => void) | undefined;
   onInteractionEnd: (() => void) | undefined;
+  onTap: OrbitControlsOptions['onTap'];
+  requestFrame: (() => void) | undefined;
+  /** Gesture state machine (tolerances are adjustable on it). */
+  readonly gestures: GestureRecognizer;
 
   private worldUp: ReadArray;
   private _up: 'y' | 'z';
   private readonly transition = new CameraTransition();
-  private mode = Mode.None;
   private _interacting = false;
-  private _dragged = false;
   private wheelTimer = 0;
   private disposed = false;
-
-  // up to two tracked pointers
-  private readonly ids = [-1, -1];
-  private readonly px = new Float64Array(2);
-  private readonly py = new Float64Array(2);
-  private pointerCount = 0;
-  private downX = 0;
-  private downY = 0;
-  private pinchDist = 0;
-  private midX = 0;
-  private midY = 0;
-  private lastTapTime = -1e9;
-  private lastTapX = 0;
-  private lastTapY = 0;
-  private readonly prevTouchAction: string;
+  private toggleKey = false;
+  private readonly prevStyles: string[] = [];
 
   constructor(element: HTMLElement, camera: Camera, options: OrbitControlsOptions = {}) {
     this.element = element;
@@ -111,9 +120,15 @@ export class OrbitControls {
     this.pickPivot = options.pickPivot;
     this.onInteractionStart = options.onInteractionStart;
     this.onInteractionEnd = options.onInteractionEnd;
+    this.onTap = options.onTap;
+    this.requestFrame = options.requestFrame;
+    this.gestures = new GestureRecognizer(this, options.gestures);
 
-    this.prevTouchAction = element.style.touchAction;
-    element.style.touchAction = 'none';
+    const st = element.style;
+    for (const [k, v] of ELEMENT_STYLES) {
+      this.prevStyles.push(st.getPropertyValue(k));
+      st.setProperty(k, v);
+    }
     element.addEventListener('pointerdown', this.onPointerDown);
     element.addEventListener('pointermove', this.onPointerMove);
     element.addEventListener('pointerup', this.onPointerUp);
@@ -121,7 +136,10 @@ export class OrbitControls {
     element.addEventListener('lostpointercapture', this.onPointerUp);
     element.addEventListener('wheel', this.onWheel, { passive: false });
     element.addEventListener('contextmenu', this.onContextMenu);
-    element.addEventListener('dblclick', this.onDblClick);
+    // Belt and braces for browsers that do not fully honour touch-action (older iOS Safari):
+    // no page scroll / pinch zoom starting on the canvas. Pointer events are unaffected.
+    element.addEventListener('touchmove', this.onTouchMove, { passive: false });
+    element.addEventListener('gesturestart', this.onPreventDefault);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -141,11 +159,11 @@ export class OrbitControls {
   }
 
   /**
-   * True if the current/last pointer gesture moved more than a few pixels. A click handler can
-   * use it to ignore the click that ends a drag.
+   * True if the current/last pointer gesture moved beyond the tap slop or used two fingers. A
+   * click handler can use it to ignore the click that ends a drag.
    */
   get dragged(): boolean {
-    return this._dragged;
+    return this.gestures.dragged;
   }
 
   get animating(): boolean {
@@ -209,8 +227,14 @@ export class OrbitControls {
     el.removeEventListener('lostpointercapture', this.onPointerUp);
     el.removeEventListener('wheel', this.onWheel);
     el.removeEventListener('contextmenu', this.onContextMenu);
-    el.removeEventListener('dblclick', this.onDblClick);
-    el.style.touchAction = this.prevTouchAction;
+    el.removeEventListener('touchmove', this.onTouchMove);
+    el.removeEventListener('gesturestart', this.onPreventDefault);
+    for (let i = 0; i < ELEMENT_STYLES.length; i++) {
+      const prev = this.prevStyles[i];
+      if (prev) el.style.setProperty(ELEMENT_STYLES[i][0], prev);
+      else el.style.removeProperty(ELEMENT_STYLES[i][0]);
+    }
+    this.gestures.reset();
     this.transition.cancel();
     if (this._interacting) {
       this._interacting = false;
@@ -250,14 +274,10 @@ export class OrbitControls {
   }
 
   private maybeEndInteraction(): void {
-    if (this._interacting && this.pointerCount === 0 && this.wheelTimer <= 0) {
+    if (this._interacting && this.gestures.pointerCount === 0 && this.wheelTimer <= 0) {
       this._interacting = false;
       this.onInteractionEnd?.();
     }
-  }
-
-  private slotOf(id: number): number {
-    return this.ids[0] === id ? 0 : this.ids[1] === id ? 1 : -1;
   }
 
   private zoom(scale: number, cssX: number, cssY: number): void {
@@ -267,98 +287,66 @@ export class OrbitControls {
     zoomAt(this.camera, scale, ndcX, ndcY, this.effectiveMinDistance(), this.effectiveMaxDistance());
   }
 
-  private readonly onPointerDown = (e: PointerEvent): void => {
+  // --- GestureSink (called by the recognizer from pointer moves) ---------------------------------
+
+  /** @internal */
+  orbit(dx: number, dy: number): void {
     if (!this.enabled) return;
-    let slot = this.slotOf(e.pointerId);
-    if (slot < 0) {
-      slot = this.ids[0] === -1 ? 0 : this.ids[1] === -1 ? 1 : -1;
-      if (slot < 0) return; // a third finger is ignored
-      this.ids[slot] = e.pointerId;
-      this.pointerCount++;
+    const k = (Math.PI / this.viewHeight()) * this.rotateSpeed;
+    orbit(this.camera, -dx * k, dy * k, this.worldUp);
+  }
+
+  /** @internal */
+  pan(dx: number, dy: number): void {
+    if (!this.enabled) return;
+    pan(this.camera, dx * this.panSpeed, dy * this.panSpeed, this.viewHeight());
+  }
+
+  /** @internal */
+  pinch(dx: number, dy: number, scale: number, midX: number, midY: number): void {
+    if (!this.enabled) return;
+    twoFingerStep(
+      this.camera,
+      dx * this.panSpeed,
+      dy * this.panSpeed,
+      Math.pow(scale, this.zoomSpeed),
+      midX,
+      midY,
+      this.viewWidth(),
+      this.viewHeight(),
+      this.effectiveMinDistance(),
+      this.effectiveMaxDistance(),
+    );
+  }
+
+  // --- DOM events ------------------------------------------------------------------------------
+
+  private readonly onPointerDown = (e: PointerEvent): void => {
+    const g = this.gestures;
+    const contact = Math.max(e.width || 0, e.height || 0);
+    if (!g.down(e.pointerId, pointerKindOf(e.pointerType), e.offsetX, e.offsetY, e.timeStamp, e.button, e.shiftKey, e.isPrimary, contact)) {
+      return; // ignored pointer (third finger, second mouse button press, ...)
     }
-    this.px[slot] = e.offsetX;
-    this.py[slot] = e.offsetY;
+    if (g.pointerCount === 1) this.toggleKey = e.ctrlKey || e.metaKey || e.shiftKey;
+    if (!this.enabled) return; // taps are still recognized; the page keeps default handling
     try {
       this.element.setPointerCapture(e.pointerId);
     } catch {
       // ignore (e.g. synthetic events)
     }
-
-    if (this.pointerCount === 1) {
-      this._dragged = false;
-      this.downX = e.offsetX;
-      this.downY = e.offsetY;
-      if (e.pointerType === 'touch') {
-        this.mode = Mode.Orbit;
-      } else if (e.button === 0 && !e.shiftKey) {
-        this.mode = Mode.Orbit;
-      } else if (e.button === 0 || e.button === 1 || e.button === 2) {
-        this.mode = Mode.Pan;
-      } else {
-        this.mode = Mode.None;
-      }
-    } else if (this.pointerCount === 2) {
-      this.mode = Mode.Touch2;
-      this.beginTwoFinger();
-    }
-    if (this.mode !== Mode.None) {
-      e.preventDefault();
-      this.startInteraction();
-    }
+    e.preventDefault();
+    if (g.mode !== GestureMode.None) this.startInteraction();
   };
-
-  private beginTwoFinger(): void {
-    const dx = this.px[1] - this.px[0], dy = this.py[1] - this.py[0];
-    this.pinchDist = Math.sqrt(dx * dx + dy * dy);
-    this.midX = (this.px[0] + this.px[1]) * 0.5;
-    this.midY = (this.py[0] + this.py[1]) * 0.5;
-  }
 
   private readonly onPointerMove = (e: PointerEvent): void => {
-    const slot = this.slotOf(e.pointerId);
-    if (slot < 0 || !this.enabled) return;
-    const x = e.offsetX, y = e.offsetY;
-    const dx = x - this.px[slot], dy = y - this.py[slot];
-    this.px[slot] = x;
-    this.py[slot] = y;
-    if (dx === 0 && dy === 0) return;
-    if (!this._dragged && Math.abs(x - this.downX) + Math.abs(y - this.downY) > CLICK_TOLERANCE_PX) this._dragged = true;
-    const h = this.viewHeight();
-
-    switch (this.mode) {
-      case Mode.Orbit: {
-        const k = (Math.PI / h) * this.rotateSpeed;
-        orbit(this.camera, -dx * k, dy * k, this.worldUp);
-        break;
-      }
-      case Mode.Pan:
-        pan(this.camera, dx * this.panSpeed, dy * this.panSpeed, h);
-        break;
-      case Mode.Touch2: {
-        const ddx = this.px[1] - this.px[0], ddy = this.py[1] - this.py[0];
-        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        const mx = (this.px[0] + this.px[1]) * 0.5;
-        const my = (this.py[0] + this.py[1]) * 0.5;
-        pan(this.camera, (mx - this.midX) * this.panSpeed, (my - this.midY) * this.panSpeed, h);
-        if (this.pinchDist > 0 && dist > 0) {
-          const ratio = this.pinchDist / dist;
-          this.zoom(Math.pow(ratio, this.zoomSpeed), mx, my);
-        }
-        this.pinchDist = dist;
-        this.midX = mx;
-        this.midY = my;
-        break;
-      }
-      default:
-        break;
-    }
+    this.gestures.move(e.pointerId, e.offsetX, e.offsetY);
   };
 
+  /** pointerup, pointercancel and lostpointercapture. */
   private readonly onPointerUp = (e: PointerEvent): void => {
-    const slot = this.slotOf(e.pointerId);
-    if (slot < 0) return;
-    this.ids[slot] = -1;
-    this.pointerCount--;
+    const g = this.gestures;
+    if (!g.tracks(e.pointerId)) return; // e.g. lostpointercapture that follows a pointerup
+    const tap = g.up(e.pointerId, e.offsetX, e.offsetY, e.timeStamp, e.type !== 'pointerup');
     if (this.element.hasPointerCapture?.(e.pointerId)) {
       try {
         this.element.releasePointerCapture(e.pointerId);
@@ -366,39 +354,13 @@ export class OrbitControls {
         // ignore
       }
     }
-
-    if (this.pointerCount === 1) {
-      // continue with the remaining finger as a one-finger orbit, without a jump
-      const rest = this.ids[0] !== -1 ? 0 : 1;
-      if (rest === 1) {
-        this.ids[0] = this.ids[1];
-        this.px[0] = this.px[1];
-        this.py[0] = this.py[1];
-        this.ids[1] = -1;
-      }
-      this.mode = Mode.Orbit;
-      return;
+    if (tap === TapKind.DoubleTap) {
+      if (this.enabled) this.requestPivot(g.tapX, g.tapY);
+    } else if (tap === TapKind.Tap) {
+      this.onTap?.(g.tapX, g.tapY, e.pointerType, this.toggleKey);
     }
-    if (this.pointerCount === 0) {
-      const wasTap = !this._dragged && this.mode !== Mode.Touch2;
-      this.mode = Mode.None;
-      if (e.pointerType === 'touch' && wasTap && e.type === 'pointerup') this.handleTap(e);
-      this.maybeEndInteraction();
-    }
+    if (g.pointerCount === 0) this.maybeEndInteraction();
   };
-
-  private handleTap(e: PointerEvent): void {
-    const t = e.timeStamp;
-    const near = Math.abs(e.offsetX - this.lastTapX) + Math.abs(e.offsetY - this.lastTapY) < DOUBLE_TAP_PX;
-    if (t - this.lastTapTime < DOUBLE_TAP_MS && near) {
-      this.lastTapTime = -1e9;
-      this.requestPivot(e.offsetX, e.offsetY);
-    } else {
-      this.lastTapTime = t;
-      this.lastTapX = e.offsetX;
-      this.lastTapY = e.offsetY;
-    }
-  }
 
   private readonly onWheel = (e: WheelEvent): void => {
     if (!this.enabled) return;
@@ -413,13 +375,17 @@ export class OrbitControls {
     this.zoom(Math.exp(delta * 0.0015 * this.zoomSpeed), e.offsetX, e.offsetY);
   };
 
+  /** Also suppresses the long-press menu on touch devices. */
   private readonly onContextMenu = (e: Event): void => {
     if (this.enabled) e.preventDefault();
   };
 
-  private readonly onDblClick = (e: MouseEvent): void => {
-    if (!this.enabled) return;
-    this.requestPivot(e.offsetX, e.offsetY);
+  private readonly onTouchMove = (e: Event): void => {
+    if (this.enabled && e.cancelable) e.preventDefault();
+  };
+
+  private readonly onPreventDefault = (e: Event): void => {
+    if (this.enabled) e.preventDefault();
   };
 
   private requestPivot(x: number, y: number): void {
@@ -434,6 +400,7 @@ export class OrbitControls {
         vec3.copy(sPoint, p);
         if (Number.isFinite(sPoint[0]) && Number.isFinite(sPoint[1]) && Number.isFinite(sPoint[2])) {
           this.setPivot(sPoint, true);
+          this.requestFrame?.();
         }
       },
       () => undefined,

@@ -141,6 +141,32 @@ export function zoomAt(
   camera.set(sEye, sTarget, null);
 }
 
+/**
+ * One two-finger step (see GestureSink.pinch): pan by the midpoint motion (dxPx, dyPx), then zoom
+ * by `scale` about the new midpoint (midX, midY), all in CSS pixels of a viewWidth x viewHeight
+ * element. A point on the plane through the target under the old midpoint ends up under the new
+ * midpoint; a pure pinch keeps every point on the midpoint's view ray under the midpoint.
+ */
+export function twoFingerStep(
+  camera: Camera,
+  dxPx: number,
+  dyPx: number,
+  scale: number,
+  midX: number,
+  midY: number,
+  viewWidth: number,
+  viewHeight: number,
+  minDistance = 0,
+  maxDistance = Infinity,
+): void {
+  if (dxPx !== 0 || dyPx !== 0) pan(camera, dxPx, dyPx, viewHeight);
+  if (scale !== 1) {
+    const ndcX = (midX / Math.max(1, viewWidth)) * 2 - 1;
+    const ndcY = 1 - (midY / Math.max(1, viewHeight)) * 2;
+    zoomAt(camera, scale, ndcX, ndcY, minDistance, maxDistance);
+  }
+}
+
 export function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }

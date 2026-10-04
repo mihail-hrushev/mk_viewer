@@ -1,7 +1,7 @@
 /**
  * Fullscreen post shaders. All use FULLSCREEN_VS (attribute-less triangle, 3 vertices).
  */
-import { LAYOUT_CONSTANTS, PACK_U32, PRECISION, RECORD_ADDRESSING, assembleShader } from './common';
+import { LAYOUT_CONSTANTS, PACK_U32, PRECISION, RECORD_ADDRESSING, SRGB, assembleShader } from './common';
 
 /**
  * Present: copies the colour target 1:1 to the bound framebuffer.
@@ -90,6 +90,86 @@ void main() {
   }
   if (!edge) discard;
   o_color = u_outlineColor;
+}
+`);
+
+/**
+ * Present with selection / hover overlay: copies the colour target 1:1 and, per pixel, looks up the
+ * fragment under it in the id target and its flags in the fragment texture:
+ *  - Selected fragments are tinted towards u_selectionColor, hovered (Highlighted) ones towards
+ *    u_highlightColor (both linear rgb + amount, mixed in linear space);
+ *  - pixels not selected but with a selected fragment at distance u_outlineWidth get the outline
+ *    colour (u_outlineWidth 0 disables the outline search).
+ * Selection / hover therefore never require re-rendering the scene: changing the flags only needs
+ * the fragment texture row upload and one present. The id target holds pickable, non-ghosted
+ * fragments only (transparent ones after the transparent-id pass), so only those are tinted.
+ * Blend off. u_colorTex, u_idTex, u_fragTex (sampler2D), u_selectionColor, u_highlightColor (vec4),
+ * u_outlineColor (vec4, sRGB rgb + alpha), u_outlineWidth (int px), u_offset (ivec2, as present).
+ */
+export const COMPOSITE_FS = assembleShader(/* glsl */ `
+${PRECISION}
+${LAYOUT_CONSTANTS}
+uniform highp sampler2D u_colorTex;
+uniform highp sampler2D u_idTex;
+uniform highp sampler2D u_fragTex;
+uniform vec4 u_selectionColor;
+uniform vec4 u_highlightColor;
+uniform vec4 u_outlineColor;
+uniform int u_outlineWidth;
+uniform ivec2 u_offset;
+out vec4 o_color;
+
+${RECORD_ADDRESSING}
+${PACK_U32}
+${SRGB}
+
+uint flagsOf(uint id) {
+  if (id == 0u) return 0u;
+  return uint(texelFetch(u_fragTex, fragTexel0(id - 1u) + ivec2(4, 0), 0).w);
+}
+
+const ivec2 DIRS[8] = ivec2[8](
+  ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+  ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1)
+);
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) + u_offset;
+  vec4 c = texelFetch(u_colorTex, p, 0);
+  uint centerId = unpackU32(texelFetch(u_idTex, p, 0));
+  uint f = flagsOf(centerId);
+  bool sel = (f & FLAG_SELECTED) != 0u;
+  if ((f & (FLAG_SELECTED | FLAG_HIGHLIGHTED)) != 0u) {
+    vec3 lin = srgbToLinear(c.rgb);
+    if (sel) lin = mix(lin, u_selectionColor.rgb, u_selectionColor.a);
+    if ((f & FLAG_HIGHLIGHTED) != 0u) lin = mix(lin, u_highlightColor.rgb, u_highlightColor.a);
+    c.rgb = linearToSrgb(lin);
+  }
+  if (u_outlineWidth > 0 && !sel) {
+    ivec2 size = textureSize(u_idTex, 0);
+    uint lastId = centerId;
+    bool lastSel = false;
+    bool edge = false;
+    // ring at the full width, plus one at half width for wide outlines (thin objects stay outlined)
+    for (int k = 0; k < 2 && !edge; ++k) {
+      int r = k == 0 ? u_outlineWidth : u_outlineWidth / 2;
+      if (k == 1 && r < 2) break;
+      for (int i = 0; i < 8; ++i) {
+        ivec2 q = clamp(p + DIRS[i] * r, ivec2(0), size - 1);
+        uint id = unpackU32(texelFetch(u_idTex, q, 0));
+        if (id != lastId) {
+          lastId = id;
+          lastSel = (flagsOf(id) & FLAG_SELECTED) != 0u;
+        }
+        if (lastSel) {
+          edge = true;
+          break;
+        }
+      }
+    }
+    if (edge) c.rgb = mix(c.rgb, u_outlineColor.rgb, u_outlineColor.a);
+  }
+  o_color = vec4(c.rgb, 1.0);
 }
 `);
 
