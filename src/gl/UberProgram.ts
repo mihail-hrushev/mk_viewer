@@ -27,12 +27,12 @@ export interface LightingParams {
 /** Defaults: light from upper-left-behind the camera, cool sky, warm-dark ground (linear). */
 export const DEFAULT_LIGHTING: LightingParams = {
   keyLightDir: [-0.35, 0.6, 0.72],
-  keyLightColor: [1.05, 1.03, 1.0],
+  keyLightColor: [0.95, 0.93, 0.9],
   // Ambient is kept low so surfaces turned away from the key light read clearly darker than lit
   // ones; raising these flattens the image.
   skyColor: [0.25, 0.27, 0.31],
   groundColor: [0.045, 0.045, 0.05],
-  contrast: 1.35,
+  contrast: 1,
 };
 
 export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost';
