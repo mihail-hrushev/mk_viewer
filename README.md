@@ -355,7 +355,7 @@ The contract, the detection rules and a do/don't list are in
 | zoom | wheel (toward the cursor) | pinch (about the fingers' midpoint) |
 | select | click (ctrl / shift + click toggles) | tap |
 | clear selection | click on the background | tap on the background |
-| set orbit centre | double click | double tap |
+| zoom to object (3x its size away, becomes the orbit centre) | double click | double tap |
 | hover highlight | move | (none) |
 
 Keyboard: `W` / `S` move the camera forward / backward along the view direction, `A` / `D` shift it
@@ -364,7 +364,7 @@ the orbit centre). The keys are read by physical position, so they work on any k
 only while the pointer is over the canvas or the canvas has focus.
 
 Moving with the keys switches to first-person mode: a left drag then looks around from where the
-camera stands instead of orbiting. Double click an object (or fit the view) to orbit again.
+camera stands instead of orbiting. Double click an object (or fit the view) to orbit again, around that object.
 
 The canvas gets `touch-action: none`, so the page does not scroll or zoom under the viewer. Your page
 should still use a viewport meta tag and keep its own controls finger-sized (see

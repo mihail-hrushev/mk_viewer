@@ -55,6 +55,11 @@ export interface OrbitControlsOptions {
    * background (GPU picking). Used for double click / double tap pivot selection.
    */
   pickPivot?: (x: number, y: number) => Promise<ArrayLike<number> | null>;
+  /**
+   * Handles a double click / double tap at CSS pixel (x, y) itself, replacing the default
+   * `pickPivot` behaviour (the handler typically calls `setCamera`).
+   */
+  onDoubleTap?: (x: number, y: number) => void;
   /** Called when the user starts interacting (drag, pinch, wheel). */
   onInteractionStart?: () => void;
   /** Called when the interaction ends (all pointers up, wheel idle for ~150 ms). */
@@ -127,6 +132,7 @@ export class OrbitControls implements GestureSink {
   minDistance: number | undefined;
   maxDistance: number | undefined;
   pickPivot: OrbitControlsOptions['pickPivot'];
+  onDoubleTap: OrbitControlsOptions['onDoubleTap'];
   onInteractionStart: (() => void) | undefined;
   onInteractionEnd: (() => void) | undefined;
   onTap: OrbitControlsOptions['onTap'];
@@ -166,6 +172,7 @@ export class OrbitControls implements GestureSink {
     this.minDistance = options.minDistance;
     this.maxDistance = options.maxDistance;
     this.pickPivot = options.pickPivot;
+    this.onDoubleTap = options.onDoubleTap;
     this.onInteractionStart = options.onInteractionStart;
     this.onInteractionEnd = options.onInteractionEnd;
     this.onTap = options.onTap;
@@ -444,7 +451,10 @@ export class OrbitControls implements GestureSink {
       }
     }
     if (tap === TapKind.DoubleTap) {
-      if (this.enabled) this.requestPivot(g.tapX, g.tapY);
+      if (this.enabled) {
+        if (this.onDoubleTap) this.onDoubleTap(g.tapX, g.tapY);
+        else this.requestPivot(g.tapX, g.tapY);
+      }
     } else if (tap === TapKind.Tap) {
       this.onTap?.(g.tapX, g.tapY, e.pointerType, this.toggleKey);
     }

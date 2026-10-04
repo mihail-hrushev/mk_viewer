@@ -74,6 +74,8 @@ const DEFAULT_BACKGROUND: [Color, Color] = [
   [0.6, 0.64, 0.69],
 ];
 const BULK_CHUNK = 32768;
+/** Double click zoom: camera distance from the object's centre, in units of its largest side. */
+const OBJECT_ZOOM_DISTANCE = 3;
 
 type Listener<K extends keyof ViewerEvents> = (payload: ViewerEvents[K]) => void;
 
@@ -208,6 +210,7 @@ export class Viewer implements ViewerApi {
             onInteractionStart: () => this.renderer.wake(),
             onInteractionEnd: () => this.renderer.wake(),
             onTap: (x, y, _type, toggle) => this.selectAt(x, y, toggle),
+            onDoubleTap: (x, y) => this.zoomToObjectAt(x, y),
             requestFrame: () => this.renderer.wake(),
           });
 
@@ -962,6 +965,32 @@ export class Viewer implements ViewerApi {
   };
 
   /** Click / tap at CSS pixel (x, y): emits `pick` and updates the selection (autoSelect). */
+  /**
+   * Double click / double tap: looks at the centre of the picked object's bounding box from
+   * OBJECT_ZOOM_DISTANCE times its largest side away, keeping the view direction. The box centre
+   * becomes the orbit pivot. Nothing happens on the background.
+   */
+  private zoomToObjectAt(x: number, y: number): void {
+    if (this.disposed) return;
+    this.pick(x, y).then((r) => {
+      if (this.disposed || !r) return;
+      const box = this.scene.getBounds([r.objectId]); // origin-relative, like the camera
+      if (!box) return;
+      const cam = this.camera;
+      const size = Math.max(box[3] - box[0], box[4] - box[1], box[5] - box[2]);
+      const dist = size > 0 ? size * OBJECT_ZOOM_DISTANCE : cam.distance;
+      const target: [number, number, number] = [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2];
+      const k = dist / Math.max(cam.distance, 1e-300);
+      const eye: [number, number, number] = [
+        target[0] + (cam.eye[0] - cam.target[0]) * k,
+        target[1] + (cam.eye[1] - cam.target[1]) * k,
+        target[2] + (cam.eye[2] - cam.target[2]) * k,
+      ];
+      this.applyCamera({ eye, target }, true);
+      this.renderer.wake();
+    }, () => undefined);
+  }
+
   private selectAt(x: number, y: number, toggle: boolean): void {
     if (this.disposed) return;
     const wantPick = this.listeners.pick.size > 0;
