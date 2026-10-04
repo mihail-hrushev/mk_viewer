@@ -136,13 +136,17 @@ export class GlState {
     }
   }
 
-  /** Binds a TEXTURE_2D to a texture unit. */
+  /**
+   * Binds a TEXTURE_2D to a texture unit and leaves that unit active, so texture calls that act on
+   * "the bound texture" (texSubImage2D, texParameteri, ...) right after this call target `tex` even
+   * when the binding itself was already cached.
+   */
   bindTexture(unit: number, tex: WebGLTexture | null): void {
+    if (this.activeUnit !== unit) {
+      this.activeUnit = unit;
+      this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+    }
     if (this.textures[unit] !== tex) {
-      if (this.activeUnit !== unit) {
-        this.activeUnit = unit;
-        this.gl.activeTexture(this.gl.TEXTURE0 + unit);
-      }
       this.textures[unit] = tex;
       this.gl.bindTexture(this.gl.TEXTURE_2D, tex);
     }
