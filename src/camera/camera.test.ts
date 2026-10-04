@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Camera } from './Camera';
-import { CameraTransition, levelCamera, orbit, pan, zoomAt, worldUpVector, POLE_EPSILON } from './orbitMath';
+import { CameraTransition, fly, levelCamera, orbit, pan, zoomAt, worldUpVector, POLE_EPSILON } from './orbitMath';
 import * as mat4 from '../math/mat4';
 import * as vec3 from '../math/vec3';
 import * as frustum from '../math/frustum';
@@ -234,6 +234,23 @@ describe('orbit math', () => {
     top.set([0, 0, 10], [0, 0, 0], [0, 1, 0]);
     levelCamera(top, up);
     expect(Array.from(top.up)).toEqual([0, 1, 0]);
+  });
+
+  it('fly moves eye and target together along the view and right vectors', () => {
+    const cam = makeCam();
+    const f = cam.getForward(vec3.create()), r = cam.getRight(vec3.create());
+    const e0 = cam.eye.slice(0), t0 = cam.target.slice(0), d0 = cam.distance;
+    fly(cam, 3, -2);
+    for (let i = 0; i < 3; i++) {
+      expect(cam.eye[i]).toBeCloseTo(e0[i] + 3 * f[i] - 2 * r[i], 9);
+      expect(cam.target[i]).toBeCloseTo(t0[i] + 3 * f[i] - 2 * r[i], 9);
+    }
+    expect(cam.distance).toBeCloseTo(d0, 9);
+    // orthographic: forward zooms (view height shrinks), sideways still translates
+    const ortho = makeCam(true);
+    const h0 = ortho.orthoHeight;
+    fly(ortho, 3, 0);
+    expect(ortho.orthoHeight).toBeLessThan(h0);
   });
 
   it('drag down moves the camera up (positive pitch)', () => {

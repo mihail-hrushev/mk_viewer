@@ -6,6 +6,9 @@
  * wheel zooms toward the cursor, double click sets the pivot through `pickPivot`.
  * Touch: one finger orbits, two fingers pinch-zoom about their midpoint and pan (no twist),
  * double tap sets the pivot. A click / tap (no drag) is reported through `onTap`.
+ * Keyboard: W / S fly forward / backward along the view direction, A / D strafe left / right
+ * (physical key positions, so any keyboard layout works); Shift moves faster. Keys act while the
+ * pointer is over the element or the element has focus, and never while typing in a form field.
  *
  * The element gets `touch-action: none` and no text selection / touch callout, so the browser does
  * not scroll, zoom or open menus on it; pointers are captured so drags continue outside it.
@@ -18,7 +21,7 @@ import type { ReadArray } from '../math/common';
 import * as aabb from '../math/aabb';
 import * as vec3 from '../math/vec3';
 import type { Camera } from './Camera';
-import { CameraTransition, levelCamera, orbit, pan, twoFingerStep, worldUpVector, zoomAt } from './orbitMath';
+import { CameraTransition, fly, levelCamera, orbit, pan, twoFingerStep, worldUpVector, zoomAt } from './orbitMath';
 import { GestureMode, GestureRecognizer, TapKind, pointerKindOf, type GestureOptions, type GestureSink } from './gestures';
 
 export interface OrbitControlsOptions {
@@ -30,6 +33,11 @@ export interface OrbitControlsOptions {
   panSpeed?: number;
   /** Multiplier on wheel/pinch zoom speed. Default 1. */
   zoomSpeed?: number;
+  /**
+   * Multiplier on W/A/S/D speed. Default 1: the camera covers its distance to the orbit target
+   * per second (so speed follows the zoom level); Shift multiplies by 4. 0 disables the keys.
+   */
+  moveSpeed?: number;
   /** Duration of animated transitions in ms. Default 400. */
   animationMs?: number;
   /**
@@ -67,6 +75,27 @@ export interface OrbitControlsOptions {
 
 const WHEEL_IDLE_MS = 150;
 
+const KEY_FORWARD = 1, KEY_BACK = 2, KEY_LEFT = 4, KEY_RIGHT = 8;
+const SHIFT_MOVE_FACTOR = 4;
+/** Longest frame time a key step is integrated over, so a stalled frame cannot jump the camera. */
+const MAX_MOVE_DT_MS = 100;
+
+function moveKeyBit(code: string): number {
+  switch (code) {
+    case 'KeyW': return KEY_FORWARD;
+    case 'KeyS': return KEY_BACK;
+    case 'KeyA': return KEY_LEFT;
+    case 'KeyD': return KEY_RIGHT;
+    default: return 0;
+  }
+}
+
+function isEditable(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
+}
+
 /** Inline styles set on the element (and restored on dispose). */
 const ELEMENT_STYLES: [string, string][] = [
   ['touch-action', 'none'],
@@ -86,6 +115,7 @@ export class OrbitControls implements GestureSink {
   rotateSpeed: number;
   panSpeed: number;
   zoomSpeed: number;
+  moveSpeed: number;
   animationMs: number;
   minDistance: number | undefined;
   maxDistance: number | undefined;
@@ -104,6 +134,11 @@ export class OrbitControls implements GestureSink {
   private wheelTimer = 0;
   private disposed = false;
   private toggleKey = false;
+  /** Bitmask of held movement keys (KEY_*). */
+  private moveKeys = 0;
+  private moveFast = false;
+  private moveFresh = false;
+  private pointerInside = false;
   private readonly prevStyles: string[] = [];
 
   constructor(element: HTMLElement, camera: Camera, options: OrbitControlsOptions = {}) {
@@ -114,6 +149,7 @@ export class OrbitControls implements GestureSink {
     this.rotateSpeed = options.rotateSpeed ?? 1;
     this.panSpeed = options.panSpeed ?? 1;
     this.zoomSpeed = options.zoomSpeed ?? 1;
+    this.moveSpeed = options.moveSpeed ?? 1;
     this.animationMs = options.animationMs ?? 400;
     this.minDistance = options.minDistance;
     this.maxDistance = options.maxDistance;
@@ -140,6 +176,13 @@ export class OrbitControls implements GestureSink {
     // no page scroll / pinch zoom starting on the canvas. Pointer events are unaffected.
     element.addEventListener('touchmove', this.onTouchMove, { passive: false });
     element.addEventListener('gesturestart', this.onPreventDefault);
+    element.addEventListener('pointerenter', this.onPointerEnter);
+    element.addEventListener('pointerleave', this.onPointerLeave);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', this.onKeyDown);
+      window.addEventListener('keyup', this.onKeyUp);
+      window.addEventListener('blur', this.onWindowBlur);
+    }
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -166,8 +209,9 @@ export class OrbitControls implements GestureSink {
     return this.gestures.dragged;
   }
 
+  /** True while a transition runs or a movement key is held (the owner must keep calling update). */
   get animating(): boolean {
-    return this.transition.active;
+    return this.transition.active || this.moveKeys !== 0;
   }
 
   /** Moves the camera to `state` (missing fields keep current values), optionally animated. */
@@ -214,10 +258,23 @@ export class OrbitControls implements GestureSink {
         this.maybeEndInteraction();
       }
     }
-    if (!this.transition.active) return false;
+    const keys = this.moveKeys;
+    if (keys !== 0 && this.enabled) {
+      const step =
+        Math.max(this.camera.distance, this.effectiveMinDistance()) *
+        this.moveSpeed *
+        (this.moveFast ? SHIFT_MOVE_FACTOR : 1) *
+        // the first frame after a key press may carry the idle time before it: use one nominal frame
+        (Math.min(Math.max(dtMs, 0), this.moveFresh ? 16 : MAX_MOVE_DT_MS) / 1000);
+      this.moveFresh = false;
+      const forward = ((keys & KEY_FORWARD) !== 0 ? 1 : 0) - ((keys & KEY_BACK) !== 0 ? 1 : 0);
+      const right = ((keys & KEY_RIGHT) !== 0 ? 1 : 0) - ((keys & KEY_LEFT) !== 0 ? 1 : 0);
+      fly(this.camera, forward * step, right * step, this.effectiveMinDistance(), this.effectiveMaxDistance());
+    }
+    if (!this.transition.active) return keys !== 0;
     const running = this.transition.step(this.camera, dtMs);
     levelCamera(this.camera, this.worldUp);
-    return running;
+    return running || keys !== 0;
   }
 
   dispose(): void {
@@ -233,6 +290,14 @@ export class OrbitControls implements GestureSink {
     el.removeEventListener('contextmenu', this.onContextMenu);
     el.removeEventListener('touchmove', this.onTouchMove);
     el.removeEventListener('gesturestart', this.onPreventDefault);
+    el.removeEventListener('pointerenter', this.onPointerEnter);
+    el.removeEventListener('pointerleave', this.onPointerLeave);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this.onKeyDown);
+      window.removeEventListener('keyup', this.onKeyUp);
+      window.removeEventListener('blur', this.onWindowBlur);
+    }
+    this.moveKeys = 0;
     for (let i = 0; i < ELEMENT_STYLES.length; i++) {
       const prev = this.prevStyles[i];
       if (prev) el.style.setProperty(ELEMENT_STYLES[i][0], prev);
@@ -278,7 +343,7 @@ export class OrbitControls implements GestureSink {
   }
 
   private maybeEndInteraction(): void {
-    if (this._interacting && this.gestures.pointerCount === 0 && this.wheelTimer <= 0) {
+    if (this._interacting && this.gestures.pointerCount === 0 && this.wheelTimer <= 0 && this.moveKeys === 0) {
       this._interacting = false;
       this.onInteractionEnd?.();
     }
@@ -390,6 +455,45 @@ export class OrbitControls implements GestureSink {
 
   private readonly onPreventDefault = (e: Event): void => {
     if (this.enabled) e.preventDefault();
+  };
+
+  private readonly onPointerEnter = (): void => {
+    this.pointerInside = true;
+  };
+
+  private readonly onPointerLeave = (): void => {
+    this.pointerInside = false;
+  };
+
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    const bit = moveKeyBit(e.code);
+    if (bit === 0) {
+      if (this.moveKeys !== 0) this.moveFast = e.shiftKey;
+      return;
+    }
+    if (!this.enabled || this.moveSpeed <= 0 || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
+    if (this.moveKeys === 0 && !this.pointerInside && document.activeElement !== this.element) return;
+    e.preventDefault();
+    this.moveFast = e.shiftKey;
+    if ((this.moveKeys & bit) !== 0) return; // key repeat
+    if (this.moveKeys === 0) this.moveFresh = true;
+    this.moveKeys |= bit;
+    this.startInteraction();
+    this.requestFrame?.();
+  };
+
+  private readonly onKeyUp = (e: KeyboardEvent): void => {
+    if (this.moveKeys === 0) return;
+    this.moveFast = e.shiftKey;
+    this.moveKeys &= ~moveKeyBit(e.code);
+    if (this.moveKeys === 0) this.maybeEndInteraction();
+  };
+
+  /** Key-up events are lost when the window loses focus: stop moving. */
+  private readonly onWindowBlur = (): void => {
+    if (this.moveKeys === 0) return;
+    this.moveKeys = 0;
+    this.maybeEndInteraction();
   };
 
   private requestPivot(x: number, y: number): void {

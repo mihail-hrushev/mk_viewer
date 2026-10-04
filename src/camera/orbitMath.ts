@@ -171,6 +171,26 @@ export function zoomAt(
 }
 
 /**
+ * Fly step: moves eye and target together by `forward` world units along the view direction and
+ * `right` units along the camera's right vector. An orthographic view has no depth cue, so there
+ * the forward part zooms instead (same on-screen effect as approaching in perspective).
+ */
+export function fly(camera: Camera, forward: number, right: number, minDistance = 0, maxDistance = Infinity): void {
+  if (forward !== 0 && camera.orthographic) {
+    zoomAt(camera, Math.exp(-forward / Math.max(camera.distance, 1e-300)), 0, 0, minDistance, maxDistance);
+    forward = 0;
+  }
+  if (forward === 0 && right === 0) return;
+  camera.getForward(sFwd);
+  camera.getRight(sRight);
+  vec3.scaleAndAdd(sEye, camera.eye, sFwd, forward);
+  vec3.scaleAndAdd(sEye, sEye, sRight, right);
+  vec3.scaleAndAdd(sTarget, camera.target, sFwd, forward);
+  vec3.scaleAndAdd(sTarget, sTarget, sRight, right);
+  camera.set(sEye, sTarget, null);
+}
+
+/**
  * One two-finger step (see GestureSink.pinch): pan by the midpoint motion (dxPx, dyPx), then zoom
  * by `scale` about the new midpoint (midX, midY), all in CSS pixels of a viewWidth x viewHeight
  * element. A point on the plane through the target under the old midpoint ends up under the new

@@ -358,6 +358,11 @@ The contract, the detection rules and a do/don't list are in
 | set orbit centre | double click | double tap |
 | hover highlight | move | (none) |
 
+Keyboard: `W` / `S` move the camera forward / backward along the view direction, `A` / `D` shift it
+left / right; hold `Shift` to move four times faster. Speed follows the zoom level (the distance to
+the orbit centre). The keys are read by physical position, so they work on any keyboard layout, and
+only while the pointer is over the canvas or the canvas has focus.
+
 The canvas gets `touch-action: none`, so the page does not scroll or zoom under the viewer. Your page
 should still use a viewport meta tag and keep its own controls finger-sized (see
 `examples/shared.css`). `new Viewer(canvas, { controls: false })` turns the built-in controls off.
