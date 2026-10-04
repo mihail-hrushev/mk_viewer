@@ -44,6 +44,8 @@ export type {
  * `viewer.registerLoader(plugin)` or `registerDefaultLoaders()`.
  */
 export * from './loaders';
+/** Optional built-in UI over the canvas: bottom toolbar and model tree panel (`createViewerUi`). */
+export * from './ui';
 /** Raw GeometryData generators (positions/normals/indices) for users who build their own data. */
 export { box, sphere, cylinder, cone, plane, torus, extrusion, triangulate } from './primitives';
 export type { PrimitiveGeometry, UpAxis } from './primitives';

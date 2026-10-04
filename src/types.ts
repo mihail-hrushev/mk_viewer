@@ -258,6 +258,12 @@ export interface ViewerApi {
   setCamera(state: Partial<CameraState>, animate?: boolean): void;
   /** Frame the given objects, or the whole scene. */
   fitToView(objectIds?: ObjectSelection, animate?: boolean): void;
+  /**
+   * Looks at the centre of the objects' bounding box from 3x its largest side away, keeping the
+   * view direction; the centre becomes the orbit pivot (what a double click on an object does).
+   * `animate` defaults to true.
+   */
+  zoomToObjects(objectIds: ObjectSelection, animate?: boolean): void;
   /** World-space bounds [minx, miny, minz, maxx, maxy, maxz] (float64), or null when empty. */
   getBounds(objectIds?: ObjectSelection): Float64Array | null;
 

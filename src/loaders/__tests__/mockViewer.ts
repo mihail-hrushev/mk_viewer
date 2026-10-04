@@ -224,6 +224,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     getCamera: () => ({ eye: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0], fov: 1, orthographic: false }),
     setCamera() {},
     fitToView() {},
+    zoomToObjects() {},
     getBounds: () => null,
     pick: async () => null,
     setSectionPlanes() {},

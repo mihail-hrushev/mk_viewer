@@ -8,7 +8,7 @@
  * URL parameters: url=<comma-separated URLs>, offset=<x shift between URL models, default 0>,
  * up=y|z (scene up axis, default z).
  */
-import { Viewer, gltfLoader, objLoader } from '../src/index';
+import { Viewer, createViewerUi, gltfLoader, objLoader } from '../src/index';
 import type { LoadTask } from '../src/index';
 import { $, button, captureErrors, expose, showStats } from './shared';
 
@@ -17,6 +17,8 @@ const viewer = new Viewer($<HTMLCanvasElement>('c'), {
   up: params.get('up') === 'y' ? 'y' : 'z',
   loaders: [gltfLoader, objLoader], // plugins are registered explicitly; only these are bundled
 });
+// built-in toolbar at the bottom centre: model tree (with name search), fit, show all
+const ui = createViewerUi(viewer);
 const errors = captureErrors($('errors'));
 
 // --- loading -------------------------------------------------------------------------------------
@@ -133,4 +135,4 @@ viewer.on('selection', (ids) => {
 });
 
 showStats(viewer, $('stats'));
-expose({ viewer, errors, load });
+expose({ viewer, ui, errors, load });

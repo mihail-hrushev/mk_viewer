@@ -973,22 +973,26 @@ export class Viewer implements ViewerApi {
   private zoomToObjectAt(x: number, y: number): void {
     if (this.disposed) return;
     this.pick(x, y).then((r) => {
-      if (this.disposed || !r) return;
-      const box = this.scene.getBounds([r.objectId]); // origin-relative, like the camera
-      if (!box) return;
-      const cam = this.camera;
-      const size = Math.max(box[3] - box[0], box[4] - box[1], box[5] - box[2]);
-      const dist = size > 0 ? size * OBJECT_ZOOM_DISTANCE : cam.distance;
-      const target: [number, number, number] = [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2];
-      const k = dist / Math.max(cam.distance, 1e-300);
-      const eye: [number, number, number] = [
-        target[0] + (cam.eye[0] - cam.target[0]) * k,
-        target[1] + (cam.eye[1] - cam.target[1]) * k,
-        target[2] + (cam.eye[2] - cam.target[2]) * k,
-      ];
-      this.applyCamera({ eye, target }, true);
-      this.renderer.wake();
+      if (!this.disposed && r) this.zoomToObjects(r.objectId);
     }, () => undefined);
+  }
+
+  zoomToObjects(objectIds: ObjectSelection, animate = true): void {
+    if (this.disposed) return;
+    const box = this.scene.getBounds(objectIds); // origin-relative, like the camera
+    if (!box) return;
+    const cam = this.camera;
+    const size = Math.max(box[3] - box[0], box[4] - box[1], box[5] - box[2]);
+    const dist = size > 0 ? size * OBJECT_ZOOM_DISTANCE : cam.distance;
+    const target: [number, number, number] = [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2];
+    const k = dist / Math.max(cam.distance, 1e-300);
+    const eye: [number, number, number] = [
+      target[0] + (cam.eye[0] - cam.target[0]) * k,
+      target[1] + (cam.eye[1] - cam.target[1]) * k,
+      target[2] + (cam.eye[2] - cam.target[2]) * k,
+    ];
+    this.applyCamera({ eye, target }, animate);
+    this.renderer.wake();
   }
 
   private selectAt(x: number, y: number, toggle: boolean): void {

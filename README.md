@@ -25,6 +25,7 @@ npm run dev     # then open http://localhost:5173/ (examples)
 - [Loading models and federation](#loading-models-and-federation)
 - [Writing a loader plugin](#writing-a-loader-plugin)
 - [Controls](#controls)
+- [Built-in toolbar and model tree](#built-in-toolbar-and-model-tree)
 - [How it stays fast](#how-it-stays-fast)
 - [Performance](#performance)
 - [Limitations and known issues](#limitations-and-known-issues)
@@ -369,6 +370,29 @@ camera stands instead of orbiting. Double click an object (or fit the view) to o
 The canvas gets `touch-action: none`, so the page does not scroll or zoom under the viewer. Your page
 should still use a viewport meta tag and keep its own controls finger-sized (see
 `examples/shared.css`). `new Viewer(canvas, { controls: false })` turns the built-in controls off.
+
+## Built-in toolbar and model tree
+
+The viewer itself draws no UI. `createViewerUi` adds an optional overlay on the canvas: a toolbar at
+the bottom centre and the model tree panel it opens.
+
+```ts
+import { Viewer, createViewerUi, gltfLoader } from 'mk-viewer';
+
+const viewer = new Viewer(canvas, { loaders: [gltfLoader] });
+const ui = createViewerUi(viewer);
+ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action */ } });
+```
+
+- **Tree** opens the node structure of every loaded model as the file defines it, with a filter by
+  node name (case-insensitive; matches are shown with the path leading to them).
+- Clicking a node selects its objects, including everything below it, and zooms the camera to them
+  the same way a double click on an object does. Clicking a model row frames the model.
+- Selecting an object on the canvas reveals and highlights its node in the open tree.
+- **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
+
+Rows are virtualised, so trees with hundreds of thousands of nodes stay responsive. The styles are
+injected under the `mkv-` class prefix; `ui.dispose()` removes everything.
 
 ## How it stays fast
 
