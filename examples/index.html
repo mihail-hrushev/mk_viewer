@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mk-viewer examples</title>
+    <style>
+      body {
+        margin: 0 auto;
+        max-width: 760px;
+        padding: 24px 16px;
+        background: #1d2025;
+        color: #e8eaed;
+        font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      a { color: #8ab4f8; }
+      li { margin: 10px 0; }
+      li a { font-weight: 600; }
+      code { font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>mk-viewer examples</h1>
+    <p>Each example is a plain HTML page plus one TypeScript file that uses only the public API.</p>
+    <ul>
+      <li><a href="./quickstart.html">quickstart</a>: the minimal scene, about 30 lines.</li>
+      <li><a href="./dynamic.html">dynamic</a>: meshes created, moved, recoloured and removed every frame.</li>
+      <li><a href="./stress.html">stress</a>: millions of instanced meshes plus unique meshes, live stats and a benchmark
+        (try <a href="./stress.html?n=3000000&amp;m=100000">3M + 100k</a>).</li>
+      <li><a href="./models.html">models</a>: load several glTF / GLB / OBJ files (federation), per-model show / hide /
+        isolate / fit / unload.</li>
+      <li><a href="./interaction.html">interaction</a>: selection events, isolate and ghosting, colour overrides, section
+        planes, fit to selection.</li>
+      <li><a href="./custom-loader.html">custom-loader</a>: a ~60-line loader plugin for a made-up format.</li>
+      <li><a href="./dist-usage/esm.html">dist-usage/esm</a> and <a href="./dist-usage/umd.html">dist-usage/umd</a>: the
+        built library without a bundler (run <code>npm run build</code> first).</li>
+    </ul>
+    <p>Controls: left drag / one finger orbits; right or middle drag, shift+drag or two fingers pan; wheel / pinch zooms;
+      click / tap selects (ctrl/shift-click toggles); double click / double tap sets the orbit centre.</p>
+  </body>
+</html>

@@ -93,11 +93,16 @@ export class Viewer implements ViewerApi {
   readonly canvas: HTMLCanvasElement;
   readonly primitives: Primitives;
 
-  /** Internal objects, exposed for advanced use and diagnostics (not part of the stable API). */
+  // Internal objects, reachable at runtime for diagnostics; not part of the API (stripped from the d.ts).
+  /** @internal */
   readonly ctx: GlContext;
+  /** @internal */
   readonly scene: Scene;
+  /** @internal */
   readonly camera: Camera;
+  /** @internal */
   readonly controls: OrbitControls | null;
+  /** @internal */
   readonly renderer: Renderer;
 
   readonly up: 'y' | 'z';
@@ -294,7 +299,7 @@ export class Viewer implements ViewerApi {
     return this.geomBox.slice(id * 6, id * 6 + 6);
   }
 
-  /** Geometry handles in use (diagnostics: live handles + released ones still used by meshes). */
+  /** @internal Geometry handles in use (diagnostics: live handles + released ones still used by meshes). */
   get geometryHandleCount(): number {
     return this.geomCount - this.geomFree.length;
   }

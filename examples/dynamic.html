@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>mk-viewer: dynamic geometry</title>
+    <link rel="stylesheet" href="./shared.css" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="panel">
+      <h1><a href="./index.html">mk-viewer</a> / dynamic geometry</h1>
+      <p>Meshes are created, moved, recoloured and removed every frame through the API.</p>
+      <div class="row">
+        <button id="play">Pause</button>
+        <button id="fit">Fit</button>
+      </div>
+      <div class="row">
+        <input id="rate" type="range" min="0" max="20" value="3" />
+        <span id="rateLabel">3 new blocks / frame</span>
+      </div>
+      <div id="stats" class="stats"></div>
+      <div id="errors" class="errors"></div>
+    </div>
+    <script type="module" src="./dynamic.ts"></script>
+  </body>
+</html>

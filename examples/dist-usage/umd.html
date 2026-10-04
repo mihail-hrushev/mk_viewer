@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  The built library through a classic <script> tag (UMD build, global `MKViewer`), no modules and no
+  bundler. Run `npm run build` first, then serve the repository root with any static file server and
+  open /examples/dist-usage/umd.html.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>mk-viewer: UMD build</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; font: 13px system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #info { position: fixed; left: 8px; top: 8px; padding: 6px 8px; color: #fff; background: rgba(0, 0, 0, 0.6); border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="info">UMD build</div>
+    <script src="../../dist/mk-viewer.umd.cjs"></script>
+    <script>
+      var viewer = new MKViewer.Viewer(document.getElementById('c'));
+      var sphere = viewer.primitives.sphere(0.5, 24);
+      var colors = [[0.9, 0.3, 0.2], [0.95, 0.75, 0.2], [0.3, 0.75, 0.4]].map(function (c) {
+        return viewer.createMaterial({ color: c, roughness: 0.4 });
+      });
+      for (var i = 0; i < 125; i++) {
+        var x = i % 5, y = Math.floor(i / 5) % 5, z = Math.floor(i / 25);
+        viewer.addMesh({ geometry: sphere, material: colors[i % 3], transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x * 1.5, y * 1.5, z * 1.5, 1] });
+      }
+      viewer.fitToView();
+      viewer.on('pick', function (hit) {
+        document.getElementById('info').textContent = hit ? 'UMD build: picked mesh ' + hit.meshId : 'UMD build';
+      });
+    </script>
+  </body>
+</html>

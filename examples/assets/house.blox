@@ -1,0 +1,40 @@
+# blox 1
+# A made-up format for the custom-loader example. z is up.
+material ground 0.45 0.55 0.35
+material wall 0.88 0.84 0.76
+material roof 0.65 0.25 0.2
+material glass 0.55 0.75 0.95 0.35
+material trunk 0.45 0.3 0.2
+material leaves 0.25 0.55 0.3
+box ground 0 0 -0.05 30 30 0.1 ground
+box floor 0 0 0.1 10 8 0.2 wall
+box wall-north 0 3.9 1.6 10 0.2 3 wall
+box wall-east 4.9 0 1.6 0.2 8 3 wall
+box wall-west -4.9 0 1.6 0.2 8 3 wall
+box wall-south-left -3.5 -3.9 1.6 3 0.2 3 wall
+box wall-south-right 3.5 -3.9 1.6 3 0.2 3 wall
+box window-south 0 -3.9 1.8 4 0.1 2 glass
+box roof-0 0 0 3.2 10.6 8.6 0.35 roof
+box roof-1 0 0 3.55 8.9 7.2 0.35 roof
+box roof-2 0 0 3.9 7.2 5.8 0.35 roof
+box roof-3 0 0 4.25 5.5 4.4 0.35 roof
+box roof-4 0 0 4.6 3.8 3 0.35 roof
+box roof-5 0 0 4.95 2.1 1.6 0.35 roof
+box tree-1-trunk -10 -9 1 0.4 0.4 2 trunk
+box tree-1-crown -10 -9 2.8 2.2 2.2 2 leaves
+box tree-2-trunk -11 2 1 0.4 0.4 2 trunk
+box tree-2-crown -11 2 2.8 2.2 2.2 2 leaves
+box tree-3-trunk -9 10 1 0.4 0.4 2 trunk
+box tree-3-crown -9 10 2.8 2.2 2.2 2 leaves
+box tree-4-trunk 9 -10 1 0.4 0.4 2 trunk
+box tree-4-crown 9 -10 2.8 2.2 2.2 2 leaves
+box tree-5-trunk 11 1 1 0.4 0.4 2 trunk
+box tree-5-crown 11 1 2.8 2.2 2.2 2 leaves
+box tree-6-trunk 8 10 1 0.4 0.4 2 trunk
+box tree-6-crown 8 10 2.8 2.2 2.2 2 leaves
+box tree-7-trunk 0 12 1 0.4 0.4 2 trunk
+box tree-7-crown 0 12 2.8 2.2 2.2 2 leaves
+box tree-8-trunk -2 -12 1 0.4 0.4 2 trunk
+box tree-8-crown -2 -12 2.8 2.2 2.2 2 leaves
+# the next line is invalid on purpose: the loader reports it with ctx.warn and goes on
+box broken 1 2 three 1 1 1 wall

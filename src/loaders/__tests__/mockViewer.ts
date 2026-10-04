@@ -58,7 +58,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
   const meshes: MockMesh[] = [];
   const calls = { createGeometry: 0, addMesh: 0, addMeshes: 0, remove: 0, setVisible: 0 };
   const stats: ViewerStats = {
-    fps: 0, frameMs: 0, meshes: 0, triangles: 0, drawItems: 0, drawCalls: 0, trianglesDrawn: 0, progress: 1, gpuMemoryBytes: 0,
+    fps: 0, frameMs: 0, meshes: 0, triangles: 0, drawItems: 0, drawCalls: 0, trianglesDrawn: 0, progress: 1, gpuMemoryBytes: 0, gpuMs: NaN,
   };
   const checkMat = (m: number) => {
     if (!(m >= 0 && m < materials.length)) throw new Error(`mock: invalid material ${m}`);

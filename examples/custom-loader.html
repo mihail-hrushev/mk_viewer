@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>mk-viewer: custom loader</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        height: 180px;
+        font: 12px/1.35 ui-monospace, Consolas, monospace;
+        color: inherit;
+        background: #111317;
+        border: 1px solid #5f6368;
+        border-radius: 4px;
+      }
+      #picked { color: #fdd663; overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="panel">
+      <h1><a href="./index.html">mk-viewer</a> / custom loader</h1>
+      <p>A ~60-line plugin for a made-up text format (<code>blox-loader.ts</code>).</p>
+      <textarea id="text" spellcheck="false"></textarea>
+      <div class="row"><button id="load">Load text</button></div>
+      <div id="info" class="stats"></div>
+      <div id="picked" class="mono"></div>
+      <div id="errors" class="errors"></div>
+    </div>
+    <script type="module" src="./custom-loader.ts"></script>
+  </body>
+</html>

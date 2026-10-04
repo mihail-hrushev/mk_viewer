@@ -124,6 +124,7 @@ export class Renderer {
     trianglesDrawn: 0,
     progress: 0,
     gpuMemoryBytes: 0,
+    gpuMs: NaN,
   };
   /** Frames rendered (diagnostics). */
   frameCount = 0;
@@ -479,6 +480,7 @@ export class Renderer {
     st.meshes = scene.meshCount;
     st.triangles = scene.triangleCount;
     st.gpuMemoryBytes = this.ctx.gpuMemoryBytes;
+    st.gpuMs = this.timer.lastMs;
     if (drew) {
       st.drawCalls = this.submitter.drawCalls;
       st.trianglesDrawn = this.submitter.trianglesDrawn;

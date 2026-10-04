@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  The built library as a native ES module, no bundler. Run `npm run build` first, then serve the
+  repository root with any static file server and open /examples/dist-usage/esm.html.
+  In your own page, point the import at wherever you put mk-viewer.js (or at a CDN copy).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>mk-viewer: ES module build</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; font: 13px system-ui, sans-serif; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #info { position: fixed; left: 8px; top: 8px; padding: 6px 8px; color: #fff; background: rgba(0, 0, 0, 0.6); border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="info">ES module build</div>
+    <script type="module">
+      import { Viewer, gltfLoader } from '../../dist/mk-viewer.js';
+
+      const viewer = new Viewer(document.getElementById('c'), { loaders: [gltfLoader] });
+      const box = viewer.primitives.box([1, 1, 1]);
+      const material = viewer.createMaterial({ color: [0.2, 0.55, 0.9] });
+      const transforms = new Float32Array(400 * 16);
+      for (let i = 0; i < 400; i++) {
+        const h = 0.5 + (i % 7) * 0.4;
+        transforms.set([0.8, 0, 0, 0, 0, h, 0, 0, 0, 0, 0.8, 0, (i % 20) - 10, h / 2, Math.floor(i / 20) - 10, 1], i * 16);
+      }
+      viewer.addMeshes({ geometry: box, material, transforms }); // 400 instances in one call
+      viewer.fitToView();
+      viewer.on('pick', (hit) => {
+        document.getElementById('info').textContent = hit ? `ES module build: picked mesh ${hit.meshId}` : 'ES module build';
+      });
+      window.viewer = viewer;
+    </script>
+  </body>
+</html>

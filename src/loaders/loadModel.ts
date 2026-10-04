@@ -24,7 +24,7 @@ export class LoaderError extends Error {
 
 const HEADER_BYTES = 256;
 
-/** @internal Hooks used by `Viewer.load` (model registry, progressive camera fit). */
+/** Hooks used by `Viewer.load` (model registry, progressive camera fit). */
 export interface LoadHooks {
   /** The load context, once the plugin is chosen (before the plugin runs). */
   onContext?(ctx: LoadContextImpl<unknown>): void;

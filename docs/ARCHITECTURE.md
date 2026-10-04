@@ -18,7 +18,8 @@ Hard rules
 src/layout.ts      shared binary layouts (contract)
 src/types.ts       public API types (contract)
 src/math/          vec3/mat4/aabb/frustum helpers on plain Float32Array, no classes on hot paths
-src/camera/        Camera (view/projection, perspective + ortho), OrbitControls, fit-to-bounds
+src/camera/        Camera (view/projection, perspective + ortho), OrbitControls (DOM wiring),
+                   gestures.ts (DOM-free mouse/touch gesture recognizer), orbitMath, fit-to-bounds
 src/primitives/    pure functions returning GeometryData (box, sphere, cylinder, cone, plane, torus, extrusion)
 src/core/          CPU scene data: FragmentList, GeometryStore, MaterialStore, Batcher, DrawList BVH + traversal
 src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, data textures, render targets,
@@ -26,8 +27,8 @@ src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, d
 src/render/        Renderer: progressive frame loop, passes, picking, overlays
 src/loaders/       model loader plugins: contract, registry, loadModel, glTF + OBJ plugins, scheduler
 src/Viewer.ts      public Viewer class implementing ViewerApi (incl. model loading / federation)
-src/index.ts       library entry (exports Viewer + types)
-examples/          demo pages served by `npm run dev`
+src/index.ts       library entry (exports Viewer, loaders, primitives and the public types)
+examples/          demo pages served by `npm run dev` (public API only; examples/index.html lists them)
 ```
 
 ## Data model
@@ -71,16 +72,24 @@ Each batch / chunk is a **draw item**: bounds, page, index range, instance range
 transparent. Draw items are stored SoA. Draw items in the same page share one VAO and are
 submitted together with `WEBGL_multi_draw` when available (fallback: loop of draw calls).
 
+**Batch groups.** Every fragment carries a `batchGroup` (`MeshParams.batchGroup`, default 0).
+Fragments of different groups are never consolidated into the same draw item, and idle merging of
+undersized items only merges within a group. `viewer.load` gives every model its own group, so a
+model's items can be culled, re-placed and unloaded without rebuilding another model's batches.
+Geometry shared between groups is still stored once (instanced, see above).
+
 Dynamic behaviour: `addMesh`/`addMeshes` queue fragments; the Batcher flushes the queue once per
 frame into new batches (so adding 100k meshes in one tick yields a few dozen batches). Removal
 clears the Visible flag immediately and records the hole; a time-sliced idle task compacts batches
 with many holes, merges undersized batches and moves batches out of sparse sealed pages so their GPU
 buffers are released (e.g. after a model is unloaded). Transform changes update the fragment record
 and grow the owning item's bounds at once; at the next flush the moved items are refitted exactly
-(bounds also shrink), an item whose moved members drifted away from unmoved ones (an item shared by
-two models, one re-placed) is split by re-batching moved and unmoved members apart, and many refits
+(bounds also shrink), an item whose moved members drifted away from unmoved ones (e.g. part of an item's
+meshes re-placed) is split by re-batching moved and unmoved members apart, and many refits
 at once rebuild the BVH. Bulk adds reuse runs of recycled fragment slots, so load / unload cycles
-do not grow the slot range.
+do not grow the slot range. The per-flush scratch arrays (sort keys, queue) are released after a
+flush of more than 2^18 fragments, so a one-off bulk add of millions does not keep ~28 bytes per
+fragment of scratch alive.
 
 ## Models and federation
 
@@ -115,6 +124,11 @@ renderer consumes it over several frames.
   pixel threshold.
 - The budget is enforced through an adaptive triangles-per-frame estimate corrected by measured
   frame time (and `EXT_disjoint_timer_query_webgl2` when available), since GL calls are asynchronous.
+  `src/render/BudgetController.ts`: multiplicative decrease on missed vsync / GPU or CPU overrun,
+  cautious increase only while frames are budget-limited and on time, a soft ceiling at the last
+  overrun. The measured GPU time is exposed as `stats.gpuMs`. On a discrete GPU (README, Performance)
+  moving frames are rarely budget-limited; what is drawn while moving is set by frustum and
+  `cullPixelSize` culling.
 
 Rendering goes to an offscreen target (colour + id + depth) that is blitted to the canvas, which is
 what makes accumulation across frames possible.
@@ -131,8 +145,23 @@ non-ghosted fragments already in the id buffer are tinted. Section planes are un
 `discard` in the fragment shader. Transparent materials and ghosted fragments draw in a second,
 blended pass that does not write ids for ghosted fragments.
 
+## Input
+
+`OrbitControls` only wires pointer events to `gestures.ts`, a DOM-free recognizer (unit tested in
+node). Mouse/pen: left drag orbits, right/middle/shift+left drag pans, wheel zooms toward the cursor.
+Touch: one finger orbits after leaving a tap slop circle (no jump), two fingers pan by the midpoint
+and pinch-zoom about it (twist ignored), lifting one of two fingers continues as an orbit without a
+jump. Taps (within slop and, for touch, a max duration) select; a double click / tap sets the orbit
+pivot through a GPU pick. The canvas gets `touch-action: none`. Hover highlight is mouse/pen only.
+
 ## Quality bar
 
 - Unit tests (Vitest, node environment) for everything that does not need a GL context.
 - `npm run typecheck`, `npm test` and `npm run build` must pass.
 - Target: 1M+ meshes / 50M+ triangles navigable at display refresh rate on a mid-range GPU.
+  Measured numbers and their conditions are in the README (Performance); `examples/stress.html`
+  has a reproducible benchmark (`?bench=1`, result in `window.benchmark`).
+- Packaging: `vite build` (ESM + UMD, global `MKViewer`) and `tsc -p tsconfig.build.json`
+  (declarations, `stripInternal`: members tagged `@internal`, such as `Viewer.renderer`, are reachable
+  at runtime for diagnostics but are not part of the typed API). `examples/dist-usage/` loads both
+  builds without a bundler.

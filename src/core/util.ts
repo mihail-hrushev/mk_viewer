@@ -46,6 +46,14 @@ export class RadixSorter {
   private vb = new Int32Array(0);
   private readonly hist = new Uint32Array(1024);
 
+  /** Releases the scratch buffers when they hold more than `maxKeep` entries. */
+  trim(maxKeep: number): void {
+    if (this.kb.length > maxKeep) {
+      this.kb = new Uint32Array(0);
+      this.vb = new Int32Array(0);
+    }
+  }
+
   /** Sorts keys[0..n) ascending, permuting vals[0..n) alongside. */
   sort(keys: Uint32Array, vals: Int32Array, n: number): void {
     if (n < 2) return;

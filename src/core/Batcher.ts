@@ -51,6 +51,8 @@ export interface BatcherOptions {
   pageEvacuateRatio?: number;
 }
 
+/** Scratch arrays larger than this (entries) are released after the flush that grew them. */
+const SCRATCH_KEEP = 1 << 18;
 const INTERIOR_STEPS = 7; // detail entries at 1/8 .. 7/8 of the item's element count
 
 export class Batcher {
@@ -281,6 +283,12 @@ export class Batcher {
     this.moveEpoch = (epoch + 1) >>> 0 || 1;
     if (n === 0) return 0;
     this.queueLen = 0;
+    const created = this.flushQueue(n, split, epoch);
+    if (n > SCRATCH_KEEP) this.trimScratch();
+    return created;
+  }
+
+  private flushQueue(n: number, split: number, epoch: number): number {
     const q = this.queue;
     if (split === 0) return this.batch(q, n);
     // keep members that moved apart from their former item-mates out of the others' batches
@@ -298,6 +306,26 @@ export class Batcher {
     let created = this.batch(q.subarray(0, u), u);
     created += this.batch(q.subarray(u, n), m);
     return created;
+  }
+
+  /**
+   * After a bulk flush (e.g. one addMeshes of millions) the per-flush scratch arrays are sized to it
+   * (~7 x 4 bytes per queued fragment). Release them: bulk adds are rare, and keeping ~110 MB of
+   * scratch alive for a 4M-mesh scene costs more than re-allocating it the next time.
+   */
+  private trimScratch(): void {
+    if (this.queue.length > SCRATCH_KEEP && this.queueLen === 0) this.queue = new Int32Array(1024);
+    if (this.mKeys.length > SCRATCH_KEEP) {
+      this.mKeys = new Uint32Array(0);
+      this.mVals = new Int32Array(0);
+    }
+    if (this.iKeys.length > SCRATCH_KEEP) {
+      this.iKeys = new Uint32Array(0);
+      this.iVals = new Int32Array(0);
+    }
+    if (this.sizes.length > SCRATCH_KEEP) this.sizes = new Float32Array(0);
+    if (this.tmp.length > SCRATCH_KEEP) this.tmp = new Int32Array(0);
+    this.radix.trim(SCRATCH_KEEP);
   }
 
   /**

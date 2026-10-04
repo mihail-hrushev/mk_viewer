@@ -1,0 +1,117 @@
+/* Shared page chrome of the mk-viewer examples: full-window canvas, no page scroll, a small panel. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #1d2025;
+  color: #e8eaed;
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+canvas {
+  display: block;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.panel {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  box-sizing: border-box;
+  max-width: min(380px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 8px 10px;
+  background: rgba(20, 22, 26, 0.78);
+  border-radius: 6px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  touch-action: manipulation;
+}
+.panel h1 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.panel h1 a {
+  color: #8ab4f8;
+  text-decoration: none;
+  font-weight: normal;
+}
+.panel p {
+  margin: 4px 0;
+  color: #bdc1c6;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+button,
+select,
+input[type='number'],
+input[type='file'] {
+  font: inherit;
+  color: inherit;
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 1px solid #5f6368;
+  border-radius: 4px;
+  background: #303338;
+}
+input[type='number'] {
+  width: 7em;
+  padding: 4px 6px;
+}
+button:active {
+  background: #44484e;
+}
+button.on {
+  background: #1a73e8;
+  border-color: #1a73e8;
+}
+input[type='range'] {
+  flex: 1;
+  min-width: 120px;
+  height: 34px;
+}
+input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.mono,
+.stats {
+  font: 12px/1.4 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+}
+.stats {
+  color: #c8ccd0;
+}
+.errors {
+  color: #ff8a80;
+  white-space: pre-wrap;
+}
+.errors:empty {
+  display: none;
+}
+/* tuck the panel away on small screens */
+details > summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 28px;
+}
+@media (max-width: 600px) {
+  .panel {
+    font-size: 12px;
+  }
+}

@@ -32,6 +32,8 @@ export { allocObjectIds, setNextObjectId, DEFAULT_OBJECT_ID_BASE } from './objec
 export { isAbortError } from './scheduler';
 export { createGltfLoader, gltfLoader } from './gltf/GltfLoader';
 export type { GltfLoaderOptions, ObjectGrouping, PrimitiveDecoder } from './gltf/GltfLoader';
+/** glTF JSON shapes that appear in `PrimitiveDecoder` / `ObjectGrouping` signatures. */
+export type { GltfJson, GltfPrimitive } from './gltf/schema';
 export { objLoader } from './obj/ObjLoader';
 export type { ObjLoaderOptions } from './obj/ObjLoader';
 

@@ -139,6 +139,11 @@ export interface ViewerStats {
   /** 0..1, how much of the visible scene the progressive renderer has presented. */
   progress: number;
   gpuMemoryBytes: number;
+  /**
+   * GPU time of the most recently measured frame in ms (EXT_disjoint_timer_query_webgl2; arrives a
+   * few frames late). NaN when the browser does not expose GPU timers.
+   */
+  gpuMs: number;
 }
 
 export interface ViewerEvents {

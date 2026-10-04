@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>mk-viewer: interaction</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <style>
+      #selection, #hover { color: #fdd663; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="panel">
+      <h1><a href="./index.html">mk-viewer</a> / interaction</h1>
+      <p>Click or tap to select; ctrl/shift-click toggles. Every table is one object of 5 meshes.</p>
+      <div id="selection">nothing selected</div>
+      <div id="hover"></div>
+      <div class="row">
+        <button id="select-tables">Select tables</button>
+        <button id="select-floor">Select slab 1</button>
+        <button id="fit-sel">Fit selection</button>
+      </div>
+      <div class="row">
+        <button id="isolate-ghost">Isolate</button>
+        <button id="isolate-hide">Isolate (hide rest)</button>
+        <button id="hide">Hide</button>
+        <button id="show-all">Show all</button>
+      </div>
+      <div class="row">
+        <button id="colour">Colour</button>
+        <button id="reset-colour">Reset colours</button>
+      </div>
+      <div class="row">
+        <label>section
+          <select id="axis">
+            <option value="off">off</option>
+            <option value="x">x</option>
+            <option value="y" selected>y</option>
+            <option value="z">z</option>
+          </select>
+        </label>
+        <label><input id="flip" type="checkbox" /> flip</label>
+      </div>
+      <div class="row"><input id="cut" type="range" min="0" max="1000" value="1000" /></div>
+      <div id="log" class="stats"></div>
+      <div id="errors" class="errors"></div>
+    </div>
+    <script type="module" src="./interaction.ts"></script>
+  </body>
+</html>
