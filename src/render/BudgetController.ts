@@ -7,7 +7,8 @@
  * afterwards:
  *
  *  - the rAF interval that followed a busy frame: when the GPU (or CPU) cannot keep up, frames
- *    miss vsync and the interval grows beyond the display refresh interval;
+ *    miss vsync and the interval grows beyond the display refresh interval (or, with a budget
+ *    longer than one refresh, beyond that budget);
  *  - the CPU time spent submitting the frame;
  *  - GPU time from EXT_disjoint_timer_query_webgl2 when available (a few frames late).
  *
@@ -72,9 +73,13 @@ export class BudgetController {
     this.maxUnits = opts.maxUnits ?? 4e8;
   }
 
-  /** Time the renderer aims to use per frame: the configured budget, but below the refresh interval. */
+  /**
+   * Time the renderer aims to use per frame. A budget shorter than the refresh interval means
+   * "never miss a vsync" (kept a little below the interval). A longer one is a minimum frame rate:
+   * frames may then span several refresh intervals, trading frame rate for a more complete image.
+   */
   get effectiveTargetMs(): number {
-    return Math.min(this.targetMs, this.refreshMs * 0.8);
+    return this.targetMs > this.refreshMs ? this.targetMs : Math.min(this.targetMs, this.refreshMs * 0.8);
   }
 
   /** Feeds the measurements of one finished frame. */
@@ -96,10 +101,15 @@ export class BudgetController {
 
     // Overload signals -> decrease factor (smallest wins).
     let factor = 1;
-    if (significant && Number.isFinite(interval) && interval > refresh * 1.4) {
-      // Missed vsync. Intervals are quantized to vsync multiples, so a frame that was 2 % too slow
-      // looks like 2x: back off mildly for one missed vsync, proportionally for severe overruns.
-      factor = interval <= refresh * 2.5 ? 0.8 : clamp((refresh * 0.9) / interval, 0.3, 0.8);
+    // Longest acceptable frame interval: one refresh, or the minimum-frame-rate budget when that
+    // is longer (plus a fraction of a refresh, since intervals are quantized to vsync multiples).
+    const slow = target > refresh;
+    const allowed = slow ? target : refresh;
+    const late = slow ? target + refresh * 0.25 : refresh * 1.4;
+    if (significant && Number.isFinite(interval) && interval > late) {
+      // Too late. Intervals are quantized to vsync multiples, so a frame that was 2 % too slow
+      // looks much slower: back off mildly for a small overrun, proportionally for severe ones.
+      factor = interval <= allowed * 2.5 ? 0.8 : clamp((allowed * 0.9) / interval, 0.3, 0.8);
     }
     if (significant && Number.isFinite(s.gpuMs) && s.gpuMs > target) {
       factor = Math.min(factor, clamp((target * 0.95) / s.gpuMs, 0.3, 0.95));
@@ -118,7 +128,7 @@ export class BudgetController {
         this.cooldown = 6;
         this.decreases++;
       }
-    } else if (s.limited && this.cooldown === 0 && (!Number.isFinite(interval) || interval <= refresh * 1.25)) {
+    } else if (s.limited && this.cooldown === 0 && (!Number.isFinite(interval) || interval <= (slow ? target : refresh * 1.25))) {
       let inc: number;
       const used = Math.max(s.cpuMs, Number.isFinite(s.gpuMs) ? s.gpuMs : 0);
       if (Number.isFinite(s.gpuMs) && used > 0.05) {

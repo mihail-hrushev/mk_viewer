@@ -124,6 +124,49 @@ describe('BudgetController', () => {
       b.update({ submitted: 1, limited: false, intervalMs: 1000 / 120, cpuMs: 0.1, gpuMs: NaN });
     }
     expect(b.refreshMs).toBeCloseTo(1000 / 120, 1);
+    // a budget longer than one refresh is a minimum frame rate and is used as given
+    expect(b.effectiveTargetMs).toBe(12);
+    // a shorter one means "never miss a refresh" and stays below the interval
+    b.targetMs = 8;
     expect(b.effectiveTargetMs).toBeLessThan(1000 / 120);
+  });
+});
+
+describe("BudgetController with a minimum frame rate (budget longer than one refresh)", () => {
+  /** GPU-bound simulation: `capacity` units fit into one refresh; intervals are vsync multiples. */
+  function run(targetMs: number, capacity: number, demand: number, frames: number, gpuTimer: boolean) {
+    const b = new BudgetController({ targetMs, initialUnits: capacity * 0.5 });
+    let lastInterval = REFRESH, lastSubmitted = 0;
+    for (let i = 0; i < frames; i++) {
+      const submitted = Math.min(b.units, demand);
+      const gpuMs = (submitted / capacity) * REFRESH;
+      const interval = Math.max(1, Math.ceil(gpuMs / REFRESH - 1e-9)) * REFRESH;
+      b.update({ submitted, limited: demand > b.units, intervalMs: interval, cpuMs: 0.5, gpuMs: gpuTimer ? gpuMs : NaN });
+      lastInterval = interval;
+      lastSubmitted = submitted;
+    }
+    return { b, lastInterval, lastSubmitted };
+  }
+
+  for (const gpuTimer of [false, true]) {
+    it(`draws about four refresh intervals of work at 15 fps (${gpuTimer ? "GPU timer" : "intervals only"})`, () => {
+      const capacity = 1e6;
+      const { b, lastInterval, lastSubmitted } = run(1000 / 15, capacity, 1e9, 1500, gpuTimer);
+      expect(b.effectiveTargetMs).toBeCloseTo(1000 / 15, 6);
+      // settles between 2 and 4 refresh intervals of work per frame, never slower than 15 fps
+      expect(lastSubmitted).toBeGreaterThan(capacity * 2);
+      expect(lastSubmitted).toBeLessThanOrEqual(capacity * 4.05);
+      expect(lastInterval).toBeLessThanOrEqual(1000 / 15 + 0.01);
+    });
+  }
+
+  it("a scene that fits into the minimum frame rate is drawn completely every frame", () => {
+    const capacity = 1e6, demand = 3.2e6; // needs 4 refresh intervals: 15 fps
+    const { lastSubmitted, lastInterval } = run(1000 / 15, capacity, demand, 800, false);
+    expect(lastSubmitted).toBe(demand);
+    expect(lastInterval).toBeCloseTo(4 * REFRESH, 6);
+    // with the old one-refresh budget the same scene is cut to about a third
+    const old = run(12, capacity, demand, 800, false);
+    expect(old.lastSubmitted).toBeLessThan(capacity * 1.01);
   });
 });

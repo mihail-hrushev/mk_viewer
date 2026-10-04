@@ -459,6 +459,15 @@ far-away detail drops out. When the camera stops, the following frames add the r
 is complete (`frameComplete`). Then the viewer stops rendering. The budget adapts to the measured GPU
 and CPU time.
 
+The budget is a minimum frame rate, `minFps`, 15 by default: a scene that the GPU can draw completely
+at 15 fps or better is drawn completely on every moving frame, so nothing drops out and comes back.
+Only a scene too heavy for that is cut to its most important part while moving. Raise `minFps` (up
+to 60) for smoother motion at the price of detail dropping out on slower GPUs:
+
+```ts
+new Viewer(canvas, { minFps: 30 });
+```
+
 What you can do to benefit:
 
 - **Reuse geometry.** Create a shape once and place it many times. Each extra placement then costs a

@@ -244,7 +244,7 @@ export class Viewer implements ViewerApi {
       frameComplete: () => this.emit('frameComplete', this.renderer.stats),
     };
     this.renderer = new Renderer(ctx, this.scene, this.camera, host, {
-      frameBudgetMs: options.frameBudgetMs ?? 12,
+      frameBudgetMs: options.frameBudgetMs ?? 1000 / Math.max(1, options.minFps ?? 15),
       cullPixelSize: options.cullPixelSize ?? 2,
       cullPixelSizeStill: options.cullPixelSizeStill ?? 0.5,
       background: [top, bottom],

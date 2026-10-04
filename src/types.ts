@@ -32,7 +32,14 @@ export interface ViewerOptions {
   up?: 'y' | 'z';
   /** Background colour(s): one colour or [top, bottom] gradient. */
   background?: Color | [Color, Color];
-  /** CPU/GPU time budget per frame in ms while the camera moves. Default 12. */
+  /**
+   * Lowest frame rate the renderer may drop to in order to show a more complete image while the
+   * camera moves. Heavy scenes are drawn as fully as fits into 1 / minFps seconds per frame; only
+   * what does not fit is left for the still image. Higher values keep motion smoother but drop
+   * more detail while moving (60 = never miss a display refresh). Default 15.
+   */
+  minFps?: number;
+  /** Frame time budget in ms; overrides `minFps` (budget = 1000 / minFps). */
   frameBudgetMs?: number;
   /** Objects whose projected size is below this many pixels are skipped while moving. Default 2. */
   cullPixelSize?: number;
