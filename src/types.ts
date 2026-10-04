@@ -6,6 +6,7 @@
  */
 
 import type { LoaderInput, LoaderPlugin, LoadOptions, LoadTask, Model } from './loaders/types';
+import type { PluginInstance, ViewerPlugin } from './plugins/types';
 
 export type Vec3 = [number, number, number] | Float32Array;
 export type Color = [number, number, number] | [number, number, number, number];
@@ -64,6 +65,12 @@ export interface ViewerOptions {
   environment?: EnvironmentSource;
   /** Options for `environment`. */
   environmentOptions?: EnvironmentOptions;
+  /**
+   * Viewer plugins (tools, overlays, UI additions; see src/plugins/README.md), installed in this
+   * order at the end of construction. Not to be confused with `loaders` (file format plugins).
+   * When one fails to install, the viewer is disposed and the constructor throws.
+   */
+  plugins?: ViewerPlugin<any>[];
 }
 
 /**
@@ -165,6 +172,98 @@ export interface PickResult {
   distance: number;
 }
 
+/** How `snap` placed the point. */
+export type SnapKind = 'vertex' | 'edge' | 'surface';
+
+export interface SnapOptions {
+  /**
+   * Magnet tolerance in CSS pixels, converted to a world radius at the hit depth. Default 12, or 24
+   * for `pointerType: 'touch'`.
+   */
+  radius?: number;
+  /** The kind of pointer the position comes from; 'touch' gets the larger default radius. */
+  pointerType?: string;
+  /** Snap to vertices. Default true. */
+  vertices?: boolean;
+  /** Snap to feature edges (boundaries and creases). Default true. */
+  edges?: boolean;
+  /**
+   * Edges between faces whose normals differ by less than this angle (degrees) are not features
+   * (e.g. the diagonal of a flat quad). Default 20.
+   */
+  edgeAngle?: number;
+}
+
+/** Result of `snap`: a picked mesh point moved to the nearest vertex or feature edge. */
+export interface SnapResult extends PickResult {
+  kind: SnapKind;
+  /** The raw surface point under the cursor (world). `position` is the snapped point. */
+  hit: [number, number, number];
+  /** For kind 'edge': the edge's end points (world). */
+  edge?: [[number, number, number], [number, number, number]];
+}
+
+/** `worldToScreen` result. */
+export interface ScreenPoint {
+  /** Canvas CSS pixels from the left / top edge (meaningless when `inFront` is false). */
+  x: number;
+  y: number;
+  /** Distance in front of the eye along the view direction (negative behind the eye). */
+  depth: number;
+  /** In front of the camera (perspective: depth > 0; orthographic: always). */
+  inFront: boolean;
+  /** In front and inside the canvas rectangle. */
+  inView: boolean;
+}
+
+/** Pointer details passed to a `ViewerTool`. */
+export interface ToolPointerInfo {
+  /** PointerEvent.pointerType: 'mouse', 'pen' or 'touch'. */
+  pointerType: string;
+  /** Ctrl, meta or shift was held. */
+  modifier: boolean;
+}
+
+/** Why a tool was deactivated. */
+export type ToolEndReason = 'api' | 'replaced' | 'escape' | 'dispose';
+
+/**
+ * An interactive tool that takes over clicks while active (`viewer.setTool`). While a tool is
+ * active, clicks / taps go to `onTap` instead of selecting, double click / double tap does not
+ * zoom (both clicks arrive as taps), and the viewer's hover highlight is off. Camera navigation
+ * (drag, wheel, pinch, keys) keeps working; a drag never produces a tap.
+ */
+export interface ViewerTool {
+  readonly name: string;
+  /** CSS cursor over the canvas while active. Default 'crosshair'. */
+  cursor?: string;
+  /** Click / tap (not a drag) at canvas CSS pixel (x, y). */
+  onTap?(x: number, y: number, info: ToolPointerInfo): void;
+  /** Mouse / pen moved over the canvas with no button pressed and no camera interaction running. */
+  onPointerMove?(x: number, y: number, info: ToolPointerInfo): void;
+  /** The pointer left the canvas, or a camera interaction started. */
+  onPointerLeave?(): void;
+  /**
+   * Escape was pressed. Return true when the tool handled it (e.g. cancelled a half-done
+   * operation) and stays active; otherwise the tool is deactivated.
+   */
+  onEscape?(): boolean | void;
+  /**
+   * Right click (not a right-button drag) on the canvas. Return true to consume it: the built-in
+   * context menu (and any other `contextmenu` listener added after the viewer) is then not shown.
+   */
+  onContextMenu?(x: number, y: number): boolean | void;
+  /** The tool stopped being the active tool. */
+  onDeactivate?(reason: ToolEndReason): void;
+}
+
+/** Payload of the `view` event. */
+export interface ViewInfo {
+  /** Canvas size in CSS pixels. */
+  width: number;
+  height: number;
+}
+
 export interface CameraState {
   eye: [number, number, number];
   target: [number, number, number];
@@ -218,6 +317,15 @@ export interface ViewerEvents {
   loadProgress: ViewerLoadProgress;
   /** The environment lighting changed (`null`: back to the default lighting). */
   environment: EnvironmentInfo | null;
+  /**
+   * The mapping of world points to the canvas changed: the camera moved (also every frame of an
+   * animated transition) or the canvas was resized. Emitted inside the animation frame, before the
+   * image of that frame is presented, so DOM positioned with `worldToScreen` here stays glued to
+   * the model. Never emitted while nothing moves.
+   */
+  view: ViewInfo;
+  /** A viewer plugin was installed (`plugins` option or `use`). */
+  pluginInstalled: { name: string; instance: PluginInstance };
 }
 
 export interface ViewerLoadProgress {
@@ -342,6 +450,18 @@ export interface ViewerApi {
   // --- queries and effects ---
   /** GPU pick at canvas CSS-pixel coordinates. */
   pick(x: number, y: number): Promise<PickResult | null>;
+  /**
+   * GPU pick at canvas CSS pixel (x, y), then a "magnet" on the picked mesh: the nearest vertex
+   * within the tolerance, else the nearest point on a feature edge (boundary or crease), else the
+   * surface point. Only geometry within the tolerance of the hit point in 3D is considered, so
+   * hidden or distant parts of the mesh are never chosen. Resolves null on the background.
+   */
+  snap(x: number, y: number, options?: SnapOptions): Promise<SnapResult | null>;
+  /**
+   * Projects a world point (float64) to canvas CSS pixels with the current camera. Allocation-free
+   * when `out` is given.
+   */
+  worldToScreen(point: ArrayLike<number>, out?: ScreenPoint): ScreenPoint;
   setSectionPlanes(planes: SectionPlane[]): void;
   /**
    * Image-based lighting: lights the scene with an HDR environment image (diffuse from its
@@ -355,6 +475,25 @@ export interface ViewerApi {
   setEnvironment(source: EnvironmentSource | null, options?: EnvironmentOptions): Promise<void>;
   /** The active environment, or null for the default lighting. */
   getEnvironment(): EnvironmentInfo | null;
+
+  // --- tools and plugins ---
+  /**
+   * Makes `tool` the active tool (see `ViewerTool`), or deactivates the current one with null. Only
+   * one tool is active at a time: activating another deactivates the previous one (its
+   * `onDeactivate('replaced')` is called). Escape deactivates the tool unless it handles it.
+   */
+  setTool(tool: ViewerTool | null): void;
+  /** The active tool, or null. */
+  getTool(): ViewerTool | null;
+  /**
+   * Installs a viewer plugin and returns its instance. Throws when a plugin with the same name is
+   * installed, or when its `install` throws (the plugin is then not installed).
+   */
+  use<T extends PluginInstance>(plugin: ViewerPlugin<T>): T;
+  /** The instance of an installed plugin, or undefined. */
+  getPlugin<T = PluginInstance>(name: string): T | undefined;
+  /** Names of the installed viewer plugins, in install order. */
+  readonly plugins: readonly string[];
 
   // --- lifecycle ---
   on<K extends keyof ViewerEvents>(event: K, handler: (payload: ViewerEvents[K]) => void): () => void;

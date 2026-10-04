@@ -153,6 +153,14 @@ non-ghosted fragments already in the id buffer are tinted. Section planes are un
 `discard` in the fragment shader. Transparent materials and ghosted fragments draw in a second,
 blended pass that does not write ids for ghosted fragments.
 
+`snap()` (src/core/snap.ts) refines a pick on the CPU copy of the quantized geometry: the query
+sphere is mapped into the mesh's u16 space as a box, triangles are rejected on raw u16 coordinates
+(a lazily built uniform grid for meshes of 50k+ triangles, LRU-bounded), candidates are transformed
+with the fragment matrix in float64 origin-relative space, and the nearest vertex / feature edge
+(boundary or crease, adjacency by quantized end points) is chosen by its distance to the view ray.
+Plugin overlays (measurement lines) are DOM over the canvas positioned with `worldToScreen` in the
+`view` event, which the renderer's camera-change hook emits inside the frame before presenting.
+
 ## Input
 
 `OrbitControls` only wires pointer events to `gestures.ts`, a DOM-free recognizer (unit tested in
@@ -161,6 +169,8 @@ Touch: one finger orbits after leaving a tap slop circle (no jump), two fingers 
 and pinch-zoom about it (twist ignored), lifting one of two fingers continues as an orbit without a
 jump. Taps (within slop and, for touch, a max duration) select; a double click / tap sets the orbit
 pivot through a GPU pick. The canvas gets `touch-action: none`. Hover highlight is mouse/pen only.
+An active tool (`setTool`, used by viewer plugins) receives taps instead of selection; the controls
+then report double taps as taps (`doubleTapEnabled = false`) and the hover highlight is off.
 
 ## Quality bar
 

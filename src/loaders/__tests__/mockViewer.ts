@@ -227,6 +227,15 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     zoomToObjects() {},
     getBounds: () => null,
     pick: async () => null,
+    snap: async () => null,
+    worldToScreen: () => ({ x: 0, y: 0, depth: 0, inFront: false, inView: false }),
+    setTool() {},
+    getTool: () => null,
+    use: () => {
+      throw new Error('mock: no viewer plugins');
+    },
+    getPlugin: () => undefined,
+    plugins: [],
     setSectionPlanes() {},
     setEnvironment: async () => {},
     getEnvironment: () => null,

@@ -51,14 +51,22 @@ import type {
   MeshParams,
   PickResult,
   Primitives,
+  ScreenPoint,
   SectionPlane,
+  SnapOptions,
+  SnapResult,
   ObjectSelection,
+  ToolEndReason,
   ViewerApi,
   ViewerEvents,
   ViewerLoadOptions,
   ViewerOptions,
   ViewerStats,
+  ViewerTool,
 } from './types';
+import type { PluginContext, PluginInstance, ViewerPlugin } from './plugins/types';
+import { createCanvasLayer, type CanvasLayer } from './plugins/overlay';
+import { SNAP_EDGE, SNAP_VERTEX, Snapper, type SnapQuery } from './core/snap';
 import type { LoaderInput, LoaderPlugin, LoadTask, Model } from './loaders/types';
 import type { LoadContextImpl, ModelImpl } from './loaders/context';
 import { loadModel } from './loaders/loadModel';
@@ -80,6 +88,10 @@ const DEFAULT_BACKGROUND: [Color, Color] = [
 const BULK_CHUNK = 32768;
 /** Double click zoom: camera distance from the object's centre, in units of its largest side. */
 const OBJECT_ZOOM_DISTANCE = 3;
+/** Default `snap` tolerance in CSS pixels (mouse / pen, touch). */
+const SNAP_RADIUS_PX = 12;
+const SNAP_RADIUS_TOUCH_PX = 24;
+const DEFAULT_EDGE_ANGLE = 20;
 
 type Listener<K extends keyof ViewerEvents> = (payload: ViewerEvents[K]) => void;
 
@@ -172,8 +184,29 @@ export class Viewer implements ViewerApi {
     modelUnloaded: new Set(),
     loadProgress: new Set(),
     environment: new Set(),
+    view: new Set(),
+    pluginInstalled: new Set(),
   };
   private lastCamera: CameraState | null = null;
+  /** Camera (origin-relative) and canvas size at the last `view` event: eye, target, up, fov, ortho, w, h. */
+  private readonly lastView = new Float64Array(13).fill(NaN);
+
+  // tools and viewer plugins
+  private tool: ViewerTool | null = null;
+  private toolCursor = '';
+  /** The active tool was told about the pointer being over the canvas (onPointerMove). */
+  private toolHover = false;
+  private readonly pluginEntries: { name: string; instance: PluginInstance }[] = [];
+  private pluginNames: readonly string[] | null = null;
+  private layer: CanvasLayer | null = null;
+  private disposing = false;
+
+  // snapping
+  private readonly snapper: Snapper;
+  private readonly snapOut = new Float64Array(9);
+  private readonly snapQuery: SnapQuery = { vertices: true, edges: true, cosAngle: 0, viewX: 0, viewY: 0, viewZ: 0 };
+  /** @internal CPU time of the last snap (ms; diagnostics). */
+  lastSnapMs = 0;
 
   // image-based lighting: the latest setEnvironment call wins (token), the prepared image is reused
   // while the source stays the same
@@ -219,9 +252,12 @@ export class Viewer implements ViewerApi {
         : new OrbitControls(canvas, this.camera, {
             up: this.up,
             pickPivot: (x, y) => this.renderer.pick(x, y).then((r) => (r ? r.position : null)),
-            onInteractionStart: () => this.renderer.wake(),
+            onInteractionStart: () => {
+              this.toolLeave();
+              this.renderer.wake();
+            },
             onInteractionEnd: () => this.renderer.wake(),
-            onTap: (x, y, _type, toggle) => this.selectAt(x, y, toggle),
+            onTap: (x, y, type, toggle) => this.tapAt(x, y, type, toggle),
             onDoubleTap: (x, y) => this.zoomToObjectAt(x, y),
             requestFrame: () => this.renderer.wake(),
           });
@@ -252,6 +288,7 @@ export class Viewer implements ViewerApi {
     });
 
     this.primitives = this.makePrimitives();
+    this.snapper = new Snapper(this.scene.geometries, this.scene.fragments);
 
     // With controls, clicks / taps come from their gesture recognizer (pointer events), which
     // classifies touch taps properly and never double-reports with the compatibility `click`.
@@ -259,6 +296,8 @@ export class Viewer implements ViewerApi {
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointermove', this.onPointerMove);
     canvas.addEventListener('pointerleave', this.onPointerLeave);
+    canvas.addEventListener('contextmenu', this.onContextMenu);
+    if (typeof window !== 'undefined') window.addEventListener('keydown', this.onKeyDown);
     this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
     this.resizeObserver?.observe(canvas);
     this.resize();
@@ -266,6 +305,14 @@ export class Viewer implements ViewerApi {
       this.setEnvironment(options.environment, options.environmentOptions).catch((e) =>
         console.error('mk-viewer: the environment could not be loaded', e),
       );
+    }
+    if (options.plugins) {
+      try {
+        for (const p of options.plugins) this.use(p);
+      } catch (e) {
+        this.dispose(); // no half-constructed viewer: earlier plugins are disposed in reverse
+        throw e;
+      }
     }
   }
 
@@ -431,6 +478,7 @@ export class Viewer implements ViewerApi {
     this.selectionCount = 0;
     this.ghostDirty = true;
     this.hoverObject = null;
+    this.snapper.clearCache();
     this.renderer.invalidateImage();
   }
 
@@ -774,6 +822,105 @@ export class Viewer implements ViewerApi {
     return res;
   }
 
+  async snap(x: number, y: number, options: SnapOptions = {}): Promise<SnapResult | null> {
+    const r = await this.renderer.pick(x, y);
+    if (!r || this.disposed) return null;
+    const px = options.radius ?? (options.pointerType === 'touch' ? SNAP_RADIUS_TOUCH_PX : SNAP_RADIUS_PX);
+    const p = r.position;
+    const radius = this.worldPerPixelAt(p[0], p[1], p[2]) * Math.max(0, px);
+    return this.snapRel(r.meshId, p[0], p[1], p[2], radius, options);
+  }
+
+  /**
+   * @internal Snap without the GPU pick: `point` (world) on mesh `meshId`, world `radius`. Used by
+   * `snap` and the unit tests.
+   */
+  snapMesh(meshId: MeshId, point: ArrayLike<number>, radius: number, options: SnapOptions = {}): SnapResult | null {
+    const o = this.origin;
+    return this.snapRel(meshId, point[0] - o[0], point[1] - o[1], point[2] - o[2], radius, options);
+  }
+
+  /** @internal Diagnostics of the last snap: candidate / scanned triangles, grid cache, CPU ms. */
+  get snapStats(): { candidates: number; scanned: number; cacheBytes: number; ms: number } {
+    const s = this.snapper;
+    return { candidates: s.lastCandidates, scanned: s.lastScanned, cacheBytes: s.cacheBytes, ms: this.lastSnapMs };
+  }
+
+  worldToScreen(point: ArrayLike<number>, out?: ScreenPoint): ScreenPoint {
+    const res = out ?? { x: 0, y: 0, depth: 0, inFront: false, inView: false };
+    const o = this.origin;
+    const x = point[0] - o[0], y = point[1] - o[1], z = point[2] - o[2];
+    const cam = this.camera;
+    const m = cam.viewProjection64;
+    const v = cam.view64;
+    const cx = m[0] * x + m[4] * y + m[8] * z + m[12];
+    const cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+    const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+    const w = this.canvas.clientWidth || cam.width;
+    const h = this.canvas.clientHeight || cam.height;
+    const inv = cw !== 0 ? 1 / cw : 0;
+    res.x = (cx * inv * 0.5 + 0.5) * w;
+    res.y = (0.5 - cy * inv * 0.5) * h;
+    res.depth = -(v[2] * x + v[6] * y + v[10] * z + v[14]);
+    res.inFront = cam.orthographic || res.depth > 0;
+    res.inView = res.inFront && res.x >= 0 && res.x <= w && res.y >= 0 && res.y <= h;
+    return res;
+  }
+
+  /** World size of one CSS pixel at origin-relative point (x, y, z) for the current camera. */
+  private worldPerPixelAt(x: number, y: number, z: number): number {
+    const cam = this.camera;
+    const h = this.canvas.clientHeight || cam.height;
+    if (cam.orthographic) return cam.orthoHeight / h;
+    const v = cam.view64;
+    const depth = -(v[2] * x + v[6] * y + v[10] * z + v[14]);
+    return (2 * Math.tan(cam.fov / 2) * Math.max(depth, 0)) / h;
+  }
+
+  private snapRel(meshId: number, px: number, py: number, pz: number, radius: number, options: SnapOptions): SnapResult | null {
+    const objectId = this.scene.objectIdOf(meshId);
+    if (objectId !== objectId) return null; // removed meanwhile
+    const q = this.snapQuery;
+    q.vertices = options.vertices ?? true;
+    q.edges = options.edges ?? true;
+    q.cosAngle = Math.cos(((options.edgeAngle ?? DEFAULT_EDGE_ANGLE) * Math.PI) / 180);
+    // direction towards the camera at the hit, for hiding points behind the hit face
+    const cam = this.camera;
+    const v3 = this.tmp3;
+    if (cam.orthographic) {
+      cam.getForward(v3);
+      v3[0] = -v3[0]; v3[1] = -v3[1]; v3[2] = -v3[2];
+    } else {
+      const ce = cam.eye;
+      const l = Math.hypot(ce[0] - px, ce[1] - py, ce[2] - pz) || 1;
+      v3[0] = (ce[0] - px) / l; v3[1] = (ce[1] - py) / l; v3[2] = (ce[2] - pz) / l;
+    }
+    q.viewX = v3[0]; q.viewY = v3[1]; q.viewZ = v3[2];
+    const so = this.snapOut;
+    const t0 = performance.now();
+    const k = this.snapper.snap(meshId, px, py, pz, radius, q, so);
+    this.lastSnapMs = performance.now() - t0;
+    const o = this.origin;
+    const e = this.camera.eye;
+    const res: SnapResult = {
+      meshId,
+      objectId,
+      position: [so[0] + o[0], so[1] + o[1], so[2] + o[2]],
+      distance: Math.hypot(so[0] - e[0], so[1] - e[1], so[2] - e[2]),
+      kind: k === SNAP_VERTEX ? 'vertex' : k === SNAP_EDGE ? 'edge' : 'surface',
+      hit: [px + o[0], py + o[1], pz + o[2]],
+    };
+    if (k === SNAP_EDGE) {
+      res.edge = [
+        [so[3] + o[0], so[4] + o[1], so[5] + o[2]],
+        [so[6] + o[0], so[7] + o[1], so[8] + o[2]],
+      ];
+    }
+    const model = this.getModelOf(objectId);
+    if (model) res.model = model;
+    return res;
+  }
+
   setSectionPlanes(planes: SectionPlane[]): void {
     if (planes.length > MAX_SECTION_PLANES) {
       throw new Error(`mk-viewer: at most ${MAX_SECTION_PLANES} section planes are supported`);
@@ -822,6 +969,135 @@ export class Viewer implements ViewerApi {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // tools and viewer plugins
+
+  setTool(tool: ViewerTool | null): void {
+    if (tool === this.tool) return;
+    if (tool && (this.disposed || this.disposing)) throw new Error('mk-viewer: setTool() after dispose()');
+    if (this.tool) this.endTool(tool ? 'replaced' : 'api');
+    if (!tool || this.tool) return; // (the deactivated tool may have activated another meanwhile)
+    this.tool = tool;
+    if (this.controls) this.controls.doubleTapEnabled = false; // both clicks are taps
+    this.toolCursor = this.canvas.style.cursor;
+    this.canvas.style.cursor = tool.cursor ?? 'crosshair';
+    // the hover highlight would compete with the tool's own feedback
+    this.hoverInside = false;
+    this.setHover(null);
+  }
+
+  getTool(): ViewerTool | null {
+    return this.tool;
+  }
+
+  use<T extends PluginInstance>(plugin: ViewerPlugin<T>): T {
+    if (this.disposed || this.disposing) throw new Error('mk-viewer: use() after dispose()');
+    if (!plugin || typeof plugin.name !== 'string' || !plugin.name || typeof plugin.install !== 'function') {
+      throw new TypeError('mk-viewer: a viewer plugin needs a non-empty string `name` and an `install(context)` function');
+    }
+    const name = plugin.name;
+    if (this.pluginEntries.some((p) => p.name === name)) {
+      throw new Error(`mk-viewer: a viewer plugin named '${name}' is already installed`);
+    }
+    const context: PluginContext = { viewer: this, overlay: () => this.pluginLayer() };
+    let result: T | void;
+    try {
+      result = plugin.install(context);
+    } catch (e) {
+      const err = new Error(`mk-viewer: viewer plugin '${name}' failed to install: ${e instanceof Error ? e.message : String(e)}`);
+      (err as { cause?: unknown }).cause = e;
+      throw err;
+    }
+    const instance = (result ?? {}) as T;
+    this.pluginEntries.push({ name, instance });
+    this.pluginNames = null;
+    this.emit('pluginInstalled', { name, instance });
+    return instance;
+  }
+
+  getPlugin<T = PluginInstance>(name: string): T | undefined {
+    for (const p of this.pluginEntries) if (p.name === name) return p.instance as unknown as T;
+    return undefined;
+  }
+
+  get plugins(): readonly string[] {
+    return (this.pluginNames ??= Object.freeze(this.pluginEntries.map((p) => p.name)));
+  }
+
+  private pluginLayer(): HTMLElement {
+    if (this.disposed) throw new Error('mk-viewer: overlay() after dispose()');
+    return (this.layer ??= createCanvasLayer(this.canvas)).element;
+  }
+
+  private endTool(reason: ToolEndReason): void {
+    const t = this.tool;
+    if (!t) return;
+    this.tool = null;
+    this.toolHover = false;
+    if (this.controls) this.controls.doubleTapEnabled = true;
+    this.canvas.style.cursor = this.toolCursor;
+    try {
+      t.onDeactivate?.(reason);
+    } catch (e) {
+      console.error(`mk-viewer: error in tool '${t.name}' onDeactivate`, e);
+    }
+  }
+
+  /** The pointer left the canvas or a camera interaction started: tell the tool once. */
+  private toolLeave(): void {
+    const t = this.tool;
+    if (!t || !this.toolHover) return;
+    this.toolHover = false;
+    try {
+      t.onPointerLeave?.();
+    } catch (e) {
+      console.error(`mk-viewer: error in tool '${t.name}' onPointerLeave`, e);
+    }
+  }
+
+  /** Click / tap (not a drag): to the active tool, else selection. */
+  private tapAt(x: number, y: number, pointerType: string, modifier: boolean): void {
+    const t = this.tool;
+    if (!t) {
+      this.selectAt(x, y, modifier);
+      return;
+    }
+    try {
+      t.onTap?.(x, y, { pointerType, modifier });
+    } catch (e) {
+      console.error(`mk-viewer: error in tool '${t.name}' onTap`, e);
+    }
+  }
+
+  private readonly onKeyDown = (e: KeyboardEvent): void => {
+    const t = this.tool;
+    if (!t || e.key !== 'Escape' || e.defaultPrevented || isEditable(e.target)) return;
+    let handled = false;
+    try {
+      handled = t.onEscape?.() === true;
+    } catch (err) {
+      console.error(`mk-viewer: error in tool '${t.name}' onEscape`, err);
+    }
+    if (!handled && this.tool === t) this.endTool('escape');
+    e.preventDefault();
+  };
+
+  /** Registered before any UI menu, so a tool can consume the right click (stopImmediatePropagation). */
+  private readonly onContextMenu = (e: MouseEvent): void => {
+    const t = this.tool;
+    if (!t || !t.onContextMenu || this.controls?.dragged) return;
+    let consumed = false;
+    try {
+      consumed = t.onContextMenu(e.offsetX, e.offsetY) === true;
+    } catch (err) {
+      console.error(`mk-viewer: error in tool '${t.name}' onContextMenu`, err);
+    }
+    if (consumed) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  };
+
+  // ---------------------------------------------------------------------------------------------
   // lifecycle
 
   on<K extends keyof ViewerEvents>(event: K, handler: (payload: ViewerEvents[K]) => void): () => void {
@@ -854,7 +1130,22 @@ export class Viewer implements ViewerApi {
   }
 
   dispose(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.disposing) return;
+    this.disposing = true;
+    // plugins first, in reverse install order, while the viewer still works
+    const plugins = this.pluginEntries;
+    for (let i = plugins.length - 1; i >= 0; i--) {
+      try {
+        plugins[i].instance.dispose?.();
+      } catch (e) {
+        console.error(`mk-viewer: error disposing viewer plugin '${plugins[i].name}'`, e);
+      }
+    }
+    plugins.length = 0;
+    this.pluginNames = null;
+    this.endTool('dispose');
+    this.layer?.dispose();
+    this.layer = null;
     for (const e of Array.from(this.loading)) e.task.abort();
     this.loading.clear();
     this.disposed = true;
@@ -863,6 +1154,8 @@ export class Viewer implements ViewerApi {
     c.removeEventListener('pointerdown', this.onPointerDown);
     c.removeEventListener('pointermove', this.onPointerMove);
     c.removeEventListener('pointerleave', this.onPointerLeave);
+    c.removeEventListener('contextmenu', this.onContextMenu);
+    if (typeof window !== 'undefined') window.removeEventListener('keydown', this.onKeyDown);
     this.resizeObserver?.disconnect();
     this.controls?.dispose();
     this.renderer.dispose();
@@ -968,6 +1261,7 @@ export class Viewer implements ViewerApi {
   }
 
   private cameraChanged(): void {
+    if (this.listeners.view.size > 0) this.viewChanged();
     if (this.listeners.camera.size === 0) return;
     const s = this.getCamera();
     const l = this.lastCamera;
@@ -983,6 +1277,28 @@ export class Viewer implements ViewerApi {
     }
     this.lastCamera = s;
     this.emit('camera', s);
+  }
+
+  /** `view` event when the camera pose / projection or the canvas size changed (not near / far only). */
+  private viewChanged(): void {
+    const cam = this.camera;
+    const l = this.lastView;
+    const w = this.canvas.clientWidth || cam.width;
+    const h = this.canvas.clientHeight || cam.height;
+    const e = cam.eye, t = cam.target, u = cam.up;
+    if (
+      l[0] === e[0] && l[1] === e[1] && l[2] === e[2] &&
+      l[3] === t[0] && l[4] === t[1] && l[5] === t[2] &&
+      l[6] === u[0] && l[7] === u[1] && l[8] === u[2] &&
+      l[9] === cam.fov && l[10] === (cam.orthographic ? 1 : 0) && l[11] === w && l[12] === h
+    ) {
+      return;
+    }
+    l[0] = e[0]; l[1] = e[1]; l[2] = e[2];
+    l[3] = t[0]; l[4] = t[1]; l[5] = t[2];
+    l[6] = u[0]; l[7] = u[1]; l[8] = u[2];
+    l[9] = cam.fov; l[10] = cam.orthographic ? 1 : 0; l[11] = w; l[12] = h;
+    this.emit('view', { width: w, height: h });
   }
 
   private emit<K extends keyof ViewerEvents>(event: K, payload: ViewerEvents[K]): void {
@@ -1014,7 +1330,7 @@ export class Viewer implements ViewerApi {
   /** Only used without built-in controls. */
   private readonly onClick = (e: MouseEvent): void => {
     if (e.button !== 0) return;
-    this.selectAt(e.offsetX, e.offsetY, e.ctrlKey || e.metaKey || e.shiftKey);
+    this.tapAt(e.offsetX, e.offsetY, (e as PointerEvent).pointerType || 'mouse', e.ctrlKey || e.metaKey || e.shiftKey);
   };
 
   /** Click / tap at CSS pixel (x, y): emits `pick` and updates the selection (autoSelect). */
@@ -1081,6 +1397,20 @@ export class Viewer implements ViewerApi {
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return;
+    const tool = this.tool;
+    if (tool) {
+      if (e.buttons !== 0 || this.controls?.interacting) {
+        this.toolLeave();
+        return;
+      }
+      this.toolHover = true;
+      try {
+        tool.onPointerMove?.(e.offsetX, e.offsetY, { pointerType: e.pointerType, modifier: e.ctrlKey || e.metaKey || e.shiftKey });
+      } catch (err) {
+        console.error(`mk-viewer: error in tool '${tool.name}' onPointerMove`, err);
+      }
+      return;
+    }
     if (!this.autoSelect && this.listeners.hover.size === 0) return;
     this.hoverInside = true;
     if (e.buttons !== 0 || this.controls?.interacting) return;
@@ -1090,6 +1420,7 @@ export class Viewer implements ViewerApi {
   };
 
   private readonly onPointerLeave = (): void => {
+    this.toolLeave();
     this.hoverInside = false;
     this.setHover(null);
   };
@@ -1157,6 +1488,12 @@ function environmentOptions(o: EnvironmentOptions): { intensity: number; rotatio
   if (!Number.isFinite(rotation)) throw new RangeError(`mk-viewer: invalid environment rotation ${rotation}`);
   if (!(keyLight >= 0 && keyLight <= 1)) throw new RangeError(`mk-viewer: environment keyLight must be in 0..1, got ${keyLight}`);
   return { intensity, rotation, keyLight };
+}
+
+function isEditable(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
 }
 
 function sameVec(a: ArrayLike<number>, b: ArrayLike<number>): boolean {

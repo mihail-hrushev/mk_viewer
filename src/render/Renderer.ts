@@ -620,6 +620,9 @@ export class Renderer {
     } else {
       this.fpsT = 0;
       this.fpsFrames = 0;
+      // the loop goes idle: the next frame must not see the idle time as its frame time (an
+      // animated transition started then would otherwise jump to its end in one frame)
+      this.lastT = 0;
     }
   }
 

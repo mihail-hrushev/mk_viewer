@@ -124,6 +124,11 @@ export class OrbitControls implements GestureSink {
   readonly element: HTMLElement;
   /** When false all input is ignored. */
   enabled = true;
+  /**
+   * When false, the second tap of a double tap is reported through `onTap` like any other tap
+   * (no pivot / `onDoubleTap`), e.g. while a tool needs every click.
+   */
+  doubleTapEnabled = true;
   rotateSpeed: number;
   panSpeed: number;
   zoomSpeed: number;
@@ -442,7 +447,8 @@ export class OrbitControls implements GestureSink {
   private readonly onPointerUp = (e: PointerEvent): void => {
     const g = this.gestures;
     if (!g.tracks(e.pointerId)) return; // e.g. lostpointercapture that follows a pointerup
-    const tap = g.up(e.pointerId, e.offsetX, e.offsetY, e.timeStamp, e.type !== 'pointerup');
+    let tap = g.up(e.pointerId, e.offsetX, e.offsetY, e.timeStamp, e.type !== 'pointerup');
+    if (tap === TapKind.DoubleTap && !this.doubleTapEnabled) tap = TapKind.Tap;
     if (this.element.hasPointerCapture?.(e.pointerId)) {
       try {
         this.element.releasePointerCapture(e.pointerId);

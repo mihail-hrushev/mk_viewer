@@ -31,6 +31,14 @@ export type {
   MeshParams,
   MeshBatchParams,
   PickResult,
+  SnapKind,
+  SnapOptions,
+  SnapResult,
+  ScreenPoint,
+  ViewerTool,
+  ToolPointerInfo,
+  ToolEndReason,
+  ViewInfo,
   CameraState,
   SectionPlane,
   EnvironmentSource,
@@ -50,6 +58,11 @@ export type {
 export * from './loaders';
 /** Optional built-in UI over the canvas: bottom toolbar and model tree panel (`createViewerUi`). */
 export * from './ui';
+/**
+ * Viewer plugins: tools and UI additions installed with `new Viewer(canvas, { plugins: [...] })` or
+ * `viewer.use(plugin)` (see src/plugins/README.md), and the built-in measurement plugin.
+ */
+export * from './plugins';
 /** Raw GeometryData generators (positions/normals/indices) for users who build their own data. */
 export { box, sphere, cylinder, cone, plane, torus, extrusion, triangulate } from './primitives';
 export type { PrimitiveGeometry, UpAxis } from './primitives';

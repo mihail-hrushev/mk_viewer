@@ -1,5 +1,5 @@
 export { createViewerUi } from './ViewerUi';
-export type { ViewerUi, ToolbarButton } from './ViewerUi';
+export type { ViewerUi, ToolbarButton, ToolbarToggle } from './ViewerUi';
 export { HierarchyPanel } from './HierarchyPanel';
 export { ModelsPanel } from './ModelsPanel';
 export { Panel } from './Panel';

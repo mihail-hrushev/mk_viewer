@@ -48,8 +48,13 @@ export class ContextMenu {
     return !this.element.hidden;
   }
 
-  addItem(item: MenuItem): void {
+  /** Adds an item; returns a function that removes it again. */
+  addItem(item: MenuItem): () => void {
     this.items.push(item);
+    return () => {
+      const i = this.items.indexOf(item);
+      if (i >= 0) this.items.splice(i, 1);
+    };
   }
 
   readonly close = (): void => {
@@ -90,7 +95,8 @@ export class ContextMenu {
       (hit) => {
         if (request !== this.request) return;
         let selection = this.viewer.getSelection();
-        if (hit && !selection.includes(hit.objectId)) {
+        // while a tool is active, clicks never select (the menu acts on the current selection)
+        if (hit && !selection.includes(hit.objectId) && !this.viewer.getTool()) {
           selection = [hit.objectId];
           this.viewer.select(selection);
         }
@@ -106,7 +112,10 @@ export class ContextMenu {
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape' && this.isOpen) this.close();
+    if (e.key === 'Escape' && this.isOpen) {
+      this.close();
+      e.preventDefault(); // consumed: an active tool does not also see this Escape
+    }
   };
 
   private show(x: number, y: number, selection: number[]): void {

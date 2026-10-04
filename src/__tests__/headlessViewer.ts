@@ -39,6 +39,7 @@ export function createHeadlessViewer(options: ViewerOptions = {}): HeadlessViewe
     height: 600,
     clientWidth: 800,
     clientHeight: 600,
+    style: {},
     getContext: () => gl,
     addEventListener: () => {},
     removeEventListener: () => {},

@@ -4,22 +4,30 @@
  * each model; the Tree panel shows their node structure. Clicking an object selects it and shows
  * its name and model (ctrl/shift-click toggles objects in the selection).
  *
+ * It is also the reference for registering viewer plugins at startup: the built-in measurement
+ * tool (`measurePlugin`, toolbar button "Measure") and a small third-party plugin written against
+ * the public API only (./section-plugin.ts, toolbar button "Cut").
+ *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
  *
  * URL parameters: url=<comma-separated URLs>, offset=<x shift between URL models, default 0>,
  * up=y|z (scene up axis, default z), env=studio|<URL of a Radiance .hdr> (image-based lighting; a
  * .hdr file can also be opened or dropped like a model).
  */
-import { Viewer, createViewerUi, gltfLoader, objLoader } from '../src/index';
+import { Viewer, createViewerUi, gltfLoader, measurePlugin, objLoader, type MeasurePlugin } from '../src/index';
+import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
 const params = new URLSearchParams(location.search);
 const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   up: params.get('up') === 'y' ? 'y' : 'z',
-  loaders: [gltfLoader, objLoader], // plugins are registered explicitly; only these are bundled
+  loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
+  // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin()],
 });
 // built-in UI: bottom toolbar, movable Tree and Models panels, right-click menu
 const ui = createViewerUi(viewer);
+const measure = viewer.getPlugin<MeasurePlugin>('measure')!; // the plugin's own API
 ui.models.open();
 
 // ?url=a.glb,b.glb loads both at once; &offset=160 places each further model 160 units along x
@@ -60,4 +68,4 @@ viewer.on('pick', (hit) => {
 });
 
 showStats(viewer, stats);
-expose({ viewer, ui });
+expose({ viewer, ui, measure });

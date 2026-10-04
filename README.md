@@ -24,6 +24,7 @@ npm run dev     # then open http://localhost:5173/ (examples)
 - [The scene API by task](#the-scene-api-by-task)
 - [Loading models and federation](#loading-models-and-federation)
 - [Writing a loader plugin](#writing-a-loader-plugin)
+- [Viewer plugins and the measurement tool](#viewer-plugins-and-the-measurement-tool)
 - [Controls](#controls)
 - [Built-in toolbar and model tree](#built-in-toolbar-and-model-tree)
 - [How it stays fast](#how-it-stays-fast)
@@ -232,9 +233,13 @@ viewer.on('hover', (hit) => ($('hover').textContent = hit ? `hover: ${names.get(
 ```
 
 `select(ids)` / `getSelection()` set and read the selection, and the `selection` event reports
-changes. `await viewer.pick(x, y)` picks at canvas CSS pixels yourself. Other events: `camera`,
-`frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`. `on()` returns an unsubscribe
-function.
+changes. `await viewer.pick(x, y)` picks at canvas CSS pixels yourself;
+`await viewer.snap(x, y)` does the same and then moves the point to the nearest vertex or feature
+edge within a screen tolerance (see [viewer plugins](#viewer-plugins-and-the-measurement-tool)).
+`viewer.worldToScreen(point)` projects a world point to canvas CSS pixels. Other events: `camera`,
+`view` (camera or canvas size changed, inside the animation frame: for positioning overlay DOM),
+`frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`, `pluginInstalled`. `on()` returns
+an unsubscribe function.
 
 ### Camera
 
@@ -387,6 +392,50 @@ The core of its loop:
 The contract, the detection rules and a do/don't list are in
 [`src/loaders/README.md`](src/loaders/README.md).
 
+## Viewer plugins and the measurement tool
+
+Two kinds of plugins, not to be confused:
+
+| | loader plugin | viewer plugin |
+| --- | --- | --- |
+| purpose | read a file format in `viewer.load()` | add behaviour and UI: tools, overlays, buttons |
+| registered with | `loaders: [...]`, `registerLoader()` | `plugins: [...]`, `viewer.use()` |
+| lifetime | one load | the viewer's lifetime |
+| guide | [`src/loaders/README.md`](src/loaders/README.md) | [`src/plugins/README.md`](src/plugins/README.md) |
+
+A viewer plugin is `{ name, install(context) }`; `install` gets the `ViewerApi` and returns the
+plugin's own API, optionally with a `ui(ui)` hook (called when the built-in UI exists) and
+`dispose()`. Applications register plugins at startup, as
+[examples/models.ts](examples/models.ts) does:
+
+```ts
+const viewer = new Viewer(canvas, {
+  loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
+  // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin()],
+});
+```
+
+```ts
+const measure = viewer.getPlugin<MeasurePlugin>('measure')!; // the plugin's own API
+```
+
+Tools take over clicks with `viewer.setTool(tool)`: clicks go to the tool instead of selecting,
+double click does not zoom, camera navigation keeps working, Escape leaves. `sectionPlugin` is a
+small third-party example in [examples/section-plugin.ts](examples/section-plugin.ts) written
+against the public exports only.
+
+**Measurement** (`measurePlugin`): the **Measure** toolbar button (or `measure.activate()`) turns
+the tool on. Moving over the model shows a magnet marker (square: vertex, diamond: feature edge,
+which is highlighted, circle: surface). Click the start point, a rubber band shows the live
+distance, click the end point; the line and a label with the distance and the axis deltas stay on
+screen, drawn on top of the model. Escape or a right click drops a started measurement; a second
+Escape leaves the tool. The right-click menu gets **Clear measurements**. On touch, tap the two
+points (the magnet is larger). Headless: `measure.add(a, b)`, `measure.measurements`,
+`remove(id)`, `clear()`, `on('created', fn)`. Options: `unit`, `decimals`, `format`, `deltas`,
+`snapRadius`, `edgeAngle`, `color`. Measurements are in world coordinates: they stay when models
+are hidden or unloaded and do not follow `model.setTransform`.
+
 ## Controls
 
 | action | mouse / pen | touch |
@@ -441,6 +490,9 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   **Hide unselected** and **Show all**. Right-clicking an object that is not selected selects it
   first; a right-button drag still pans. Add your own entries with
   `ui.addMenuItem({ label, onClick: (selection) => ... })`.
+- `ui.addToggle({ label, onClick })` adds an on / off toolbar button whose state you set
+  (`toggle.on = true`). Viewer plugins add their buttons through their `ui(ui)` hook, so they
+  appear whether the UI is created before or after the plugin is installed.
 
 Rows are virtualised, so trees with hundreds of thousands of nodes stay responsive. The styles are
 injected under the `mkv-` class prefix; `ui.dispose()` removes everything.
@@ -538,7 +590,14 @@ here was measured on a phone or tablet.
 - **Objects not yet drawn are not pickable.** Picking reads the GPU id buffer of the image on screen.
   While a heavy image is still being refined, small objects that are not drawn yet cannot be picked
   or hovered.
-- **No textures, lines or points.** Triangles with per-material colour only.
+- **No textures, lines or points.** Triangles with per-material colour only. (Measurement lines are
+  an HTML/SVG overlay, not rendered geometry.)
+- **Snapping** works on the picked mesh only (a corner where two separate meshes meet snaps to the
+  picked mesh's vertex), on the CPU copy of the quantized geometry (vertex positions are exact to
+  1/65535 of the mesh's extent). Feature edges are found by matching quantized end points, so edges
+  of separate meshes or of exporters' cracked tessellations are boundaries. Meshes with 50k+
+  triangles get a spatial grid on their first snap (~80 ms for 1M triangles, ~15 MB, cached, 64 MB
+  budget in total).
 - **Environment lighting is approximate.** Reflections come from a box-filtered mip pyramid picked
   by roughness, not a GGX-prefiltered map, so blurred reflections are softer and less accurate in
   lobe shape than in an offline renderer. Diffuse light is order-2 SH (smooth, no sharp sun shadows),
