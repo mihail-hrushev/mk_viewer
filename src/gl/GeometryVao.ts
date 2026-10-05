@@ -103,6 +103,10 @@ export class GeometryVao implements GlResource {
     const state = this.ctx.state;
     const vao = gl.createVertexArray();
     if (!vao) throw new Error('mk-viewer: createVertexArray failed');
+    // VAOs are created lazily in the middle of a pass (GpuScene slots, Renderer.drawInOrder), where
+    // ranges may already be queued for the bound VAO: restore that binding afterwards, or the queued
+    // draw is flushed against the wrong (default) VAO.
+    const prev = state.boundVao;
     state.bindVao(vao);
     const stride = this.instanceBuffer ? SHARED_VERTEX_STRIDE : MERGED_VERTEX_STRIDE;
 
@@ -123,7 +127,7 @@ export class GeometryVao implements GlResource {
 
     // ELEMENT_ARRAY_BUFFER binding is VAO state.
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer.buffer);
-    state.bindVao(null);
+    state.bindVao(prev);
     return vao;
   }
 }

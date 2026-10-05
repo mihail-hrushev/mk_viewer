@@ -60,6 +60,27 @@ describe('MirroredBuffer', () => {
   });
 });
 
+describe('GeometryVao', () => {
+  it('creating a VAO keeps the bound VAO bound (lazy creation mid-pass with queued draws)', () => {
+    const { ctx, fake } = createFakeContext();
+    const vb = new MirroredBuffer(ctx, 'vertex');
+    const ib = new MirroredBuffer(ctx, 'index');
+    const inst = new MirroredBuffer(ctx, 'instance');
+    vb.setSource(new Uint8Array(MERGED_VERTEX_STRIDE * 3));
+    ib.setSource(new Uint32Array(3));
+    inst.setSource(new Uint32Array(4));
+    const a = GeometryVao.merged(ctx, vb, ib);
+    a.bind();
+    fake.reset();
+    GeometryVao.instanced(ctx, vb, ib, inst);
+    GeometryVao.merged(ctx, vb, ib);
+    expect(ctx.state.boundVao).toBe(a.vao);
+    const binds = fake.callsOf('bindVertexArray');
+    expect(binds[binds.length - 1].args[0]).toBe(a.vao);
+    expect(binds.some((c) => c.args[0] === null)).toBe(false);
+  });
+});
+
 describe('DataTexture', () => {
   it('uploads full rows and a partial last row', () => {
     const { ctx, fake } = createFakeContext();
