@@ -111,6 +111,9 @@ void main() {
  * where neighbouring pixels of the target (+-1 px in x and y) differ in
  *  - face normal (u_normalTex, RG8 octahedral, written by the uber EDGES variant) by more than the
  *    crease angle; coplanar triangles share the normal, so diagonals of flat faces never show;
+ *    a pair bridged by a face within the crease angle of both beside it (another neighbour of p or a
+ *    diagonal one) only meets at a vertex (diagonal facets of a tessellated smooth surface) and gets
+ *    no line;
  *  - depth (u_depthTex, as "nearness" 1 / view depth, which is linear across planes): a step more
  *    than twice the gentler of the steps beside it plus 1.5 pixel footprints plus the depth
  *    quantization noise; planes at grazing angles and smooth curves stay clean: silhouettes and
@@ -178,19 +181,35 @@ vec3 normalAt(ivec2 q) {
   return normalize(octDecode(texelFetch(u_normalTex, q, 0).rg * 2.0 - 1.0));
 }
 
-// Line weight pixel p gets from the boundary to its neighbour p + dir (0..1).
-float edgeTo(ivec2 p, ivec2 dir, ivec2 maxp, float lc, vec3 nc, uint idc) {
-  ivec2 q = clamp(p + dir, ivec2(0), maxp);
-  float lq = nearness(q);
-  bool bgc = lc < -1e19;
-  bool bgq = lq < -1e19;
-  if (bgc && bgq) return 0.0;
+// 1 for face normals within the crease angle of each other, 0 beyond it (smooth around it).
+float alike(vec3 a, vec3 b) {
+  float c = u_edgeParams.x;
+  return smoothstep(c - 0.02, c + 0.02, dot(a, b));
+}
+
+// A neighbour of the pixel: nearness, fragment id, face normal (fetched once, shared by the tests of
+// all four directions).
+struct Texel {
+  float l;
+  uint id;
+  vec3 n;
+};
+
+Texel texelAt(ivec2 q, ivec2 maxp) {
+  q = clamp(q, ivec2(0), maxp);
+  return Texel(nearness(q), unpackU32(texelFetch(u_idTex, q, 0)), normalAt(q));
+}
+
+// Line weight pixel p (not background) gets from the boundary to its neighbour q = p + dir (0..1).
+// o = p - dir; crease: the crease line weight towards q (see edgeWeight).
+float edgeTo(ivec2 p, ivec2 dir, ivec2 maxp, float lc, uint idc, Texel q, Texel o, float crease) {
+  float lq = q.l;
   float nearSide = lc >= lq ? 1.0 : EDGE_SOFT;
-  if (bgc || bgq) return nearSide; // silhouette against the background
+  if (lq < -1e19) return nearSide; // silhouette against the background
   // Depth: planes are linear in nearness, so the step across the boundary is compared with the
   // steps beside it. More than twice the gentler side's step (+ 1.5 pixel footprints + depth
   // quantization) is an occlusion edge; planes at any angle and smooth curves are not.
-  float lo = nearness(clamp(p - dir, ivec2(0), maxp));
+  float lo = o.l;
   float lqq = nearness(clamp(p + 2 * dir, ivec2(0), maxp));
   float slope = 1e20;
   if (lo > -1e19) slope = abs(lc - lo);
@@ -206,21 +225,67 @@ float edgeTo(ivec2 p, ivec2 dir, ivec2 maxp, float lc, vec3 nc, uint idc) {
   float e = smoothstep(tol, 2.0 * tol, abs(lq - lc)) * nearSide;
   // crease and id lines: on the pixel whose neighbour lies towards +x / +y
   float fixedSide = dir.x + dir.y > 0 ? 1.0 : EDGE_SOFT;
-  float c = u_edgeParams.x;
-  float crease = smoothstep(c + 0.02, c - 0.02, dot(nc, normalAt(q)));
-  uint idq = unpackU32(texelFetch(u_idTex, q, 0));
-  if (idc != idq && idc != 0u && idq != 0u) crease = 1.0;
+  if (idc != q.id && idc != 0u && q.id != 0u) crease = 1.0;
   return max(e, crease * fixedSide);
 }
 
 float edgeWeight(ivec2 p, uint idc) {
   ivec2 maxp = textureSize(u_depthTex, 0) - 1;
+  Texel px = texelAt(p + ivec2(1, 0), maxp);
+  Texel mx = texelAt(p - ivec2(1, 0), maxp);
+  Texel py = texelAt(p + ivec2(0, 1), maxp);
+  Texel my = texelAt(p - ivec2(0, 1), maxp);
   float lc = nearness(p);
+  // background: the far side of a silhouette
+  if (lc < -1e19) return max(max(px.l, mx.l), max(py.l, my.l)) > -1e19 ? EDGE_SOFT : 0.0;
   vec3 nc = normalAt(p);
-  float w = edgeTo(p, ivec2(1, 0), maxp, lc, nc, idc);
-  w = max(w, edgeTo(p, ivec2(-1, 0), maxp, lc, nc, idc));
-  w = max(w, edgeTo(p, ivec2(0, 1), maxp, lc, nc, idc));
-  w = max(w, edgeTo(p, ivec2(0, -1), maxp, lc, nc, idc));
+  // Crease towards each neighbour: its face normal differs from p's by more than the crease angle.
+  vec4 d = vec4(dot(nc, px.n), dot(nc, mx.n), dot(nc, py.n), dot(nc, my.n));
+  float c = u_edgeParams.x;
+  vec4 s = smoothstep(c - 0.02, c + 0.02, d);
+  vec4 crease = 1.0 - s;
+  if (any(lessThan(s, vec4(1.0)))) {
+    // A crease line separates two faces along a shared edge. Faces that only share a vertex (the
+    // diagonal facets of a tessellated smooth surface, compared across the vertex) may differ by
+    // more than the crease angle although no edge between them does, which would leave an isolated
+    // dot. There a third face within the crease angle of both lies beside the pair: no line. First
+    // at the two other neighbours of p, which must belong to the same fragment.
+    vec4 v = vec4(px.l > -1e19 && px.id == idc, mx.l > -1e19 && mx.id == idc,
+                  py.l > -1e19 && py.id == idc, my.l > -1e19 && my.id == idc);
+    vec4 sv = s * v;
+    // faces of the x neighbours alike the faces of the y neighbours: +x+y, +x-y, -x+y, -x-y
+    vec4 xy = vec4(alike(px.n, py.n), alike(px.n, my.n), alike(mx.n, py.n), alike(mx.n, my.n));
+    vec4 bridged = vec4(
+      max(min(sv.z, xy.x), min(sv.w, xy.y)),  // +x across +y or -y
+      max(min(sv.z, xy.z), min(sv.w, xy.w)),  // -x
+      max(min(sv.x, xy.x), min(sv.y, xy.z)),  // +y across +x or -x
+      max(min(sv.x, xy.y), min(sv.y, xy.w))); // -y
+    // A neighbour on p's or q's own face is alike both by s already (a crease near the angle is
+    // soft): only what a bridging face adds beyond that removes the line.
+    vec4 keep = 1.0 - clamp((bridged - s) / max(crease, 1e-4), 0.0, 1.0);
+    // Otherwise the bridging face may lie beside q, at a diagonal neighbour (normal only: the
+    // cleared background normal faces away and never bridges). Only faces less than twice the
+    // crease angle apart can be bridged, so most real creases skip these fetches.
+    float c2 = 2.0 * c * c - 1.0 - 0.05; // cos(2 * crease angle), with the smoothstep margin
+    if (any(greaterThan(keep * crease * step(c2, d), vec4(0.0)))) {
+      vec3 dpp = normalAt(clamp(p + ivec2(1, 1), ivec2(0), maxp));
+      vec3 dpm = normalAt(clamp(p + ivec2(1, -1), ivec2(0), maxp));
+      vec3 dmp = normalAt(clamp(p + ivec2(-1, 1), ivec2(0), maxp));
+      vec3 dmm = normalAt(clamp(p + ivec2(-1, -1), ivec2(0), maxp));
+      vec4 sd = vec4(alike(nc, dpp), alike(nc, dpm), alike(nc, dmp), alike(nc, dmm));
+      bridged = max(bridged, vec4(
+        max(min(sd.x, alike(dpp, px.n)), min(sd.y, alike(dpm, px.n))),
+        max(min(sd.z, alike(dmp, mx.n)), min(sd.w, alike(dmm, mx.n))),
+        max(min(sd.x, alike(dpp, py.n)), min(sd.z, alike(dmp, py.n))),
+        max(min(sd.y, alike(dpm, my.n)), min(sd.w, alike(dmm, my.n)))));
+      keep = 1.0 - clamp((bridged - s) / max(crease, 1e-4), 0.0, 1.0);
+    }
+    crease *= keep;
+  }
+  float w = edgeTo(p, ivec2(1, 0), maxp, lc, idc, px, mx, crease.x);
+  w = max(w, edgeTo(p, ivec2(-1, 0), maxp, lc, idc, mx, px, crease.y));
+  w = max(w, edgeTo(p, ivec2(0, 1), maxp, lc, idc, py, my, crease.z));
+  w = max(w, edgeTo(p, ivec2(0, -1), maxp, lc, idc, my, py, crease.w));
   return w;
 }
 #endif

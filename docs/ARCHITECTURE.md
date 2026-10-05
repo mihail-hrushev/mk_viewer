@@ -150,7 +150,10 @@ are keyed by section planes / environment / edges): the octahedral view-space fa
 The 'all' and 'id' draw-buffer modes include it, so the transparent-id pass writes the normals of
 the nearest transparent surface together with its depth and id. Lines are computed at present time
 by the `EDGES` variant of `COMPOSITE_FS` from depth (as 1 / view depth, linear across planes, so a
-step is compared with the steps beside it), normals (crease angle) and ids (touching meshes). Since
+step is compared with the steps beside it), normals (crease angle) and ids (touching meshes). A
+crease between two pixels is dropped when a pixel beside the pair (another 4-neighbour, else a
+diagonal one) holds a face within the crease angle of both: that pair only meets at a vertex
+(diagonal facets of a tessellated smooth surface), which would otherwise leave isolated dots. Since
 they are derived from whatever the targets hold when presenting, they are right on partial
 progressive images and never accumulate; colour / angle changes only re-present. Near / far /
 projection used for linearizing are snapshotted per image.
