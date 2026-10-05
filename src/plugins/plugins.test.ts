@@ -9,6 +9,7 @@ import type { ViewerUi } from '../ui/ViewerUi';
 import type { ViewerPlugin } from './types';
 import { measurePlugin, type MeasurePlugin, type Measurement } from './measure/measurePlugin';
 import { clipSegment2D, depthCutT, formatDistance, labelOffset } from './measure/geometry';
+import { colorPlugin, type ColorPlugin } from './color/colorPlugin';
 
 let hv: HeadlessViewer | null = null;
 afterEach(() => {
@@ -204,37 +205,34 @@ describe('measure plugin (headless)', () => {
     expect(t.onContextMenu!(0, 0)).toBe(false);
   });
 
-  it('ui hook adds a toggle and a menu item, and removes them again', () => {
+  it('ui hook adds a toggle and removes it again; the menu entry belongs to the plugin', () => {
     hv = createHeadlessViewer({ plugins: [measurePlugin()] });
-    const m = hv.viewer.getPlugin<MeasurePlugin>('measure')!;
+    const v = hv.viewer;
+    const m = v.getPlugin<MeasurePlugin>('measure')!;
     const toggle = { element: {} as HTMLButtonElement, on: false, removed: false, remove() { this.removed = true; } };
-    let item: { label: string; enabled?: (s: number[]) => boolean; onClick: (s: number[]) => void } | null = null;
     let onClick: (() => void) | null = null;
     const fakeUi = {
       addToggle: (b: { onClick: () => void }) => {
         onClick = b.onClick;
         return toggle;
       },
-      addMenuItem: (i: typeof item) => {
-        item = i;
-        return () => (item = null);
-      },
     } as unknown as ViewerUi;
     const cleanup = m.ui!(fakeUi) as () => void;
-    expect(item!.label).toBe('Clear measurements');
-    expect(item!.enabled!([])).toBe(false);
+    const clearEntry = () => v.contextMenuAt(0, 0, 'mouse', null).items.find((e) => e.label === 'Clear measurements')!;
+    expect(clearEntry().enabled).toBe(false);
     m.add([0, 0, 0], [1, 0, 0]);
-    expect(item!.enabled!([])).toBe(true);
+    expect(clearEntry().enabled).toBe(true);
     onClick!();
     expect(m.active).toBe(true);
     expect(toggle.on).toBe(true);
     m.deactivate();
     expect(toggle.on).toBe(false);
-    item!.onClick([]);
+    clearEntry().run();
     expect(m.measurements.length).toBe(0);
     cleanup();
     expect(toggle.removed).toBe(true);
-    expect(item).toBeNull();
+    expect(v.removePlugin('measure')).toBe(true);
+    expect(v.contextMenuAt(0, 0, 'mouse', null).items).toEqual([]);
   });
 
   it('custom format, deltas option and name', () => {
@@ -243,6 +241,214 @@ describe('measure plugin (headless)', () => {
     expect(m.format(1.2345)).toBe('1235 mm');
     expect(formatDistance(2, 3, '')).toBe('2.000');
     expect(formatDistance(2.5, 1, 'ft')).toBe('2.5 ft');
+  });
+});
+
+describe('removePlugin', () => {
+  it('disposes the plugin, removes its context registrations and emits pluginRemoved', () => {
+    const log: string[] = [];
+    hv = createHeadlessViewer({ plugins: [logPlugin('a', log), logPlugin('b', log)] });
+    const v = hv.viewer;
+    const removed: string[] = [];
+    v.on('pluginRemoved', (p) => removed.push(p.name));
+    expect(v.removePlugin('nope')).toBe(false);
+    expect(v.removePlugin('a')).toBe(true);
+    expect(log).toEqual(['install a', 'install b', 'dispose a']);
+    expect(removed).toEqual(['a']);
+    expect(v.plugins).toEqual(['b']);
+    expect(v.getPlugin('a')).toBeUndefined();
+    v.use(logPlugin('a', log)); // the name is free again
+    expect(v.plugins).toEqual(['b', 'a']);
+    hv.dispose();
+    hv = null;
+    expect(log.slice(-2)).toEqual(['dispose a', 'dispose b']);
+    expect(removed).toEqual(['a']); // viewer.dispose() does not emit pluginRemoved
+  });
+
+  it('context menu items of a plugin go away with it, on a failed install and on early removal', () => {
+    hv = createHeadlessViewer();
+    const v = hv.viewer;
+    const labels = () => v.contextMenuAt(0, 0, 'mouse', null).items.map((e) => e.label);
+    let removeB: (() => void) | null = null;
+    v.use({
+      name: 'p',
+      install(ctx) {
+        expect(ctx.name).toBe('p');
+        ctx.addContextMenuItem({ label: 'A', onClick: () => {} });
+        removeB = ctx.addContextMenuItem({ label: 'B', onClick: () => {} });
+      },
+    });
+    v.addContextMenuItem({ label: 'host', order: -1, onClick: () => {} });
+    expect(labels()).toEqual(['host', 'A', 'B']);
+    removeB!();
+    removeB!(); // idempotent
+    expect(labels()).toEqual(['host', 'A']);
+    v.removePlugin('p');
+    expect(labels()).toEqual(['host']);
+    expect(() =>
+      v.use({
+        name: 'bad',
+        install(ctx) {
+          ctx.addContextMenuItem({ label: 'X', onClick: () => {} });
+          throw new Error('nope');
+        },
+      }),
+    ).toThrow(/failed to install/);
+    expect(labels()).toEqual(['host']);
+  });
+});
+
+describe('context menu', () => {
+  function scene(options = {}) {
+    hv = createHeadlessViewer(options);
+    const v = hv.viewer;
+    const geo = v.primitives.box();
+    const mat = v.createMaterial();
+    v.addMesh({ geometry: geo, material: mat, objectId: 7 });
+    v.addMesh({ geometry: geo, material: mat, objectId: 8 });
+    const hit = (objectId: number) => ({ meshId: 0, objectId, position: [0, 0, 0] as [number, number, number], distance: 1 });
+    return { v, hit };
+  }
+
+  it('right-clicking an unselected object selects it; inside the selection keeps it; background keeps it', () => {
+    const { v, hit } = scene({ autoSelect: true });
+    const sel: number[][] = [];
+    v.on('selection', (s) => sel.push(s));
+    let r = v.contextMenuAt(10, 20, 'mouse', hit(7));
+    expect(r.selection).toEqual([7]);
+    expect(v.getSelection()).toEqual([7]);
+    v.select([7, 8]);
+    r = v.contextMenuAt(10, 20, 'mouse', hit(8));
+    expect(r.selection).toEqual([7, 8]);
+    r = v.contextMenuAt(10, 20, 'mouse', null);
+    expect(r.selection).toEqual([7, 8]);
+    expect(r.hit).toBeNull();
+    expect([r.x, r.y, r.pointerType]).toEqual([10, 20, 'mouse']);
+    expect(sel).toEqual([[7], [7, 8]]);
+    // while a tool is active, right clicks never select
+    v.setTool({ name: 't' });
+    v.select([]);
+    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([]);
+  });
+
+  it('without autoSelect the selection is left to the application', () => {
+    const { v, hit } = scene();
+    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([]);
+    expect(v.getSelection()).toEqual([]);
+  });
+
+  it('visible / enabled / order / run, errors are contained, the event can be prevented', () => {
+    const { v, hit } = scene({ autoSelect: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const clicked: string[] = [];
+    v.addContextMenuItem({ label: 'late', order: 5, onClick: () => clicked.push('late') });
+    v.addContextMenuItem({
+      label: 'objects only',
+      visible: (c) => c.hit !== null,
+      enabled: (c) => c.selection.length === 1,
+      onClick: (c) => clicked.push(`obj ${c.hit!.objectId}`),
+    });
+    v.addContextMenuItem({ label: 'first', order: -3, title: 'tip', onClick: () => clicked.push('first') });
+    v.addContextMenuItem({ label: 'broken', visible: () => { throw new Error('x'); }, onClick: () => {} });
+    v.addContextMenuItem({ label: 'throws', onClick: () => { throw new Error('y'); } });
+    const events: string[] = [];
+    v.on('contextMenu', (req) => {
+      events.push(req.items.map((e) => e.label).join(','));
+      req.preventDefault();
+    });
+    const bg = v.contextMenuAt(0, 0, 'mouse', null);
+    expect(bg.items.map((e) => e.label)).toEqual(['first', 'throws', 'late']);
+    expect(bg.items[0].title).toBe('tip');
+    expect(bg.items[0].order).toBe(-3);
+    expect(bg.defaultPrevented).toBe(true);
+    const on = v.contextMenuAt(0, 0, 'touch', hit(8));
+    expect(on.items.map((e) => [e.label, e.enabled])).toEqual([
+      ['first', true],
+      ['objects only', true],
+      ['throws', true],
+      ['late', true],
+    ]);
+    on.items[1].run();
+    on.items[2].run(); // logged, not thrown
+    v.select([7, 8]);
+    const two = v.contextMenuAt(0, 0, 'mouse', hit(8));
+    expect(two.items[1].enabled).toBe(false);
+    two.items[1].run(); // disabled: no-op
+    expect(clicked).toEqual(['obj 8']);
+    expect(events.length).toBe(3);
+    expect(err).toHaveBeenCalled();
+    expect(() => v.addContextMenuItem({ label: 'x' } as never)).toThrow(/onClick/);
+    err.mockRestore();
+  });
+});
+
+describe('colour overrides', () => {
+  it('getColor returns the override (sRGB + strength) of an object, null without one', () => {
+    hv = createHeadlessViewer();
+    const v = hv.viewer;
+    const geo = v.primitives.box();
+    const mat = v.createMaterial({ color: [0.2, 0.4, 0.6] });
+    v.addMeshes({ geometry: geo, material: mat, transforms: new Float64Array(32).map((_, i) => (i % 5 === 0 ? 1 : 0)), objectIds: [5, 5] });
+    const plain = v.addMesh({ geometry: geo, material: mat });
+    expect(v.getColor(5)).toBeNull();
+    v.setColor(5, [1, 0.5, 0]);
+    const c = v.getColor(5)!;
+    expect(c[0]).toBeCloseTo(1, 5);
+    expect(c[1]).toBeCloseTo(0.5, 5);
+    expect(c[2]).toBeCloseTo(0, 5);
+    expect(c[3]).toBe(1);
+    v.setColor({ first: plain, count: 1 }, [0, 0, 1, 0.5]);
+    expect(v.getColor(plain)![3]).toBe(0.5);
+    v.setColor([5, plain], null);
+    expect(v.getColor(5)).toBeNull();
+    expect(v.getColor(plain)).toBeNull();
+    expect(v.getColor(12345)).toBeNull();
+  });
+});
+
+describe('colour plugin', () => {
+  it('menu entries colour and reset the selection; removed with the plugin', () => {
+    hv = createHeadlessViewer({ autoSelect: true, plugins: [colorPlugin()] });
+    const v = hv.viewer;
+    const geo = v.primitives.box();
+    const mat = v.createMaterial();
+    v.addMesh({ geometry: geo, material: mat, objectId: 1 });
+    v.addMesh({ geometry: geo, material: mat, objectId: 2 });
+    const hit = (objectId: number) => ({ meshId: 0, objectId, position: [0, 0, 0] as [number, number, number], distance: 1 });
+    const entries = (h: ReturnType<typeof hit> | null) =>
+      Object.fromEntries(v.contextMenuAt(0, 0, 'mouse', h).items.map((e) => [e.label, e]));
+
+    let m = entries(null);
+    expect(m.Red.enabled).toBe(false); // nothing selected
+    expect(m['Reset colour'].enabled).toBe(false);
+    m = entries(hit(1)); // selects object 1
+    expect(m.Red.enabled).toBe(true);
+    expect(m['Reset colour'].enabled).toBe(false);
+    m.Red.run();
+    expect(v.getColor(1)).toEqual([1, 0, 0, 1]);
+    expect(v.getColor(2)).toBeNull();
+    m = entries(hit(1));
+    expect(m['Reset colour'].enabled).toBe(true);
+    m['Reset colour'].run();
+    expect(v.getColor(1)).toBeNull();
+
+    const p = v.getPlugin<ColorPlugin>('color')!;
+    p.apply([2]);
+    expect(v.getColor(2)).toEqual([1, 0, 0, 1]);
+    p.reset([2]);
+    expect(v.getColor(2)).toBeNull();
+    expect(p.color).toEqual([1, 0, 0]);
+
+    v.removePlugin('color');
+    expect(Object.keys(entries(null))).toEqual([]);
+  });
+
+  it('options: colour, labels, no reset entry, name', () => {
+    hv = createHeadlessViewer({ plugins: [colorPlugin({ name: 'paint', color: [0, 0, 1, 0.5], label: 'Blue', resetLabel: null, order: 3 })] });
+    const items = hv.viewer.contextMenuAt(0, 0, 'mouse', null).items;
+    expect(items.map((e) => [e.label, e.order])).toEqual([['Blue', 3]]);
+    expect(hv.viewer.getPlugin<ColorPlugin>('paint')!.color).toEqual([0, 0, 1, 0.5]);
+    expect(() => colorPlugin({ color: [2, 0, 0] })).toThrow(/0\.\.1/);
   });
 });
 

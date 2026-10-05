@@ -1,5 +1,5 @@
 /**
- * Viewer plugin contract (see src/plugins/README.md).
+ * Viewer plugin contract (see docs/PLUGIN_API.md).
  *
  * A viewer plugin adds behaviour and UI to a running viewer (a measurement tool, a section box, an
  * annotation layer...). It is a different thing from a *loader* plugin (src/loaders/types.ts),
@@ -10,7 +10,7 @@
  *
  * Plugins use only the public `ViewerApi` they get through the context.
  */
-import type { ViewerApi } from '../types';
+import type { ContextMenuItem, ViewerApi } from '../types';
 import type { ViewerUi } from '../ui/ViewerUi';
 
 /**
@@ -21,10 +21,15 @@ export interface PluginInstance {
   /**
    * Called when the built-in UI is created (`createViewerUi`), or right away at install when it
    * already exists. Add toolbar buttons, menu items and DOM here. May return a function that removes
-   * them again (called by `ui.dispose()`); `dispose()` should remove them too.
+   * them again (called by `ui.dispose()`, and when the plugin is removed with `viewer.removePlugin`,
+   * after `dispose()`); `dispose()` should remove them too.
    */
   ui?(ui: ViewerUi): void | (() => void);
-  /** Called by `viewer.dispose()` (plugins are disposed in reverse install order). */
+  /**
+   * Called by `viewer.removePlugin(name)` and by `viewer.dispose()` (plugins are disposed in reverse
+   * install order). Unsubscribe events, end your tool, remove your DOM and undo scene changes that
+   * should not outlive the plugin.
+   */
   dispose?(): void;
 }
 
@@ -32,12 +37,20 @@ export interface PluginInstance {
 export interface PluginContext {
   /** The viewer the plugin is installed on. */
   readonly viewer: ViewerApi;
+  /** The plugin's name (`ViewerPlugin.name`). */
+  readonly name: string;
   /**
    * A pointer-transparent layer over the canvas for the plugin's own DOM (labels, SVG), shared by
    * all plugins of this viewer and created on first call. It follows the canvas rectangle and lies
    * below the built-in UI. Set `pointer-events: auto` on elements that should receive input.
    */
   overlay(): HTMLElement;
+  /**
+   * `viewer.addContextMenuItem` owned by this plugin: the entry is also removed when the plugin is
+   * removed (`viewer.removePlugin`), when its `install` throws, and when the viewer is disposed.
+   * The returned function removes it earlier.
+   */
+  addContextMenuItem(item: ContextMenuItem): () => void;
 }
 
 /**

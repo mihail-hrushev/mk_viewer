@@ -6,6 +6,7 @@ loader plugins and multi-model federation. TypeScript, built with Vite as ESM + 
 - `README.md` is for library clients. `docs/ARCHITECTURE.md` is the design. `src/loaders/README.md`
   is the guide for loader plugin authors. Read the architecture doc before changing `src/core`,
   `src/gl` or `src/render`.
+- `docs/PLUGIN_API.md` is the guide for viewer plugin authors; keep it in step with `src/plugins/types.ts`.
 
 ## Commands
 

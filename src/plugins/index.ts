@@ -5,3 +5,5 @@
 export type { ViewerPlugin, PluginContext, PluginInstance } from './types';
 export { measurePlugin } from './measure/measurePlugin';
 export type { MeasurePlugin, MeasureOptions, Measurement, MeasurePoint, MeasureEvents } from './measure/measurePlugin';
+export { colorPlugin } from './color/colorPlugin';
+export type { ColorPlugin, ColorPluginOptions } from './color/colorPlugin';

@@ -54,6 +54,7 @@ const CSS = `
 .mkv-menu-item{font:inherit;color:inherit;text-align:left;min-height:34px;padding:4px 12px;border:0;border-radius:5px;background:transparent;cursor:pointer;white-space:nowrap}
 .mkv-menu-item:hover:not(:disabled){background:#3c4043}
 .mkv-menu-item:disabled{color:#80868b;cursor:default}
+.mkv-menu-sep{height:1px;margin:4px 2px;background:#3c4043}
 .mkv-empty{padding:12px;color:#9aa0a6}
 `;
 

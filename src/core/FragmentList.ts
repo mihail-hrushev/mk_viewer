@@ -268,6 +268,16 @@ export class FragmentList {
     this.dirty.mark(i >> ROW_SHIFT);
   }
 
+  /** Reads the colour override (linear rgb + strength) of fragment i into out[0..4). */
+  getColor(i: number, out: Float64Array | number[]): void {
+    const o = i * FRAG_FLOATS + FRAG_COLOR;
+    const r = this.records;
+    out[0] = r[o];
+    out[1] = r[o + 1];
+    out[2] = r[o + 2];
+    out[3] = r[o + 3];
+  }
+
   setObjectId(i: number, id: number): void {
     const cur = this.objectId[i];
     if (cur === id) return;

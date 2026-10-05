@@ -68,7 +68,7 @@ export interface ViewerOptions {
   /** Edge display from the start: `true` for the defaults, or its options (see `setEdges`). Default off. */
   edges?: boolean | EdgeOptions;
   /**
-   * Viewer plugins (tools, overlays, UI additions; see src/plugins/README.md), installed in this
+   * Viewer plugins (tools, overlays, UI additions; see docs/PLUGIN_API.md), installed in this
    * order at the end of construction. Not to be confused with `loaders` (file format plugins).
    * When one fails to install, the viewer is disposed and the constructor throws.
    */
@@ -279,6 +279,68 @@ export interface ViewerTool {
   onDeactivate?(reason: ToolEndReason): void;
 }
 
+/**
+ * Where and on what a context menu was opened (right click without drag, long press on touch, or
+ * `openContextMenu`). Passed to the `visible`, `enabled` and `onClick` callbacks of every
+ * `ContextMenuItem` of that menu.
+ */
+export interface ContextMenuContext {
+  /** Canvas CSS pixels of the right click. */
+  readonly x: number;
+  readonly y: number;
+  /** PointerEvent.pointerType of the right click: 'mouse', 'pen' or 'touch'. */
+  readonly pointerType: string;
+  /** The object under the pointer, or null on the background. */
+  readonly hit: PickResult | null;
+  /**
+   * The objects the menu acts on (objectIds): the selection after the right click. Right-clicking an
+   * object outside the selection selects it first (unless `autoSelect` is off or a tool is active),
+   * so this is usually what the user pointed at. May be empty.
+   */
+  readonly selection: readonly number[];
+}
+
+/** An entry of the canvas context menu (`viewer.addContextMenuItem`, `PluginContext.addContextMenuItem`). */
+export interface ContextMenuItem {
+  label: string;
+  /** Tooltip. */
+  title?: string;
+  /**
+   * Sort key: lower first, equal keys in registration order. Items of equal `order` form a group;
+   * the built-in menu draws a line between groups. The built-in UI's own items use -100. Default 0.
+   */
+  order?: number;
+  /** Listed only when this returns true. Default: always listed. */
+  visible?(context: ContextMenuContext): boolean;
+  /** Listed but disabled when this returns false. Default: always enabled. */
+  enabled?(context: ContextMenuContext): boolean;
+  /** The item was chosen. */
+  onClick(context: ContextMenuContext): void;
+}
+
+/** A listed item of a `ContextMenuRequest`, with `visible` / `enabled` already evaluated. */
+export interface ContextMenuEntry {
+  readonly label: string;
+  readonly title?: string;
+  readonly order: number;
+  readonly enabled: boolean;
+  /** Calls the item's `onClick` with the request's context (errors are logged); no-op when disabled. */
+  run(): void;
+}
+
+/**
+ * Payload of the `contextMenu` event: a menu was requested, here are its items. The built-in UI
+ * (`createViewerUi`) shows them; to show your own menu instead, call `preventDefault()` synchronously
+ * in your handler and call `entry.run()` for the chosen entry.
+ */
+export interface ContextMenuRequest extends ContextMenuContext {
+  /** The visible items, sorted by `order`. May be empty. */
+  readonly items: readonly ContextMenuEntry[];
+  /** Asks the built-in menu not to show this request. */
+  preventDefault(): void;
+  readonly defaultPrevented: boolean;
+}
+
 /** Payload of the `view` event. */
 export interface ViewInfo {
   /** Canvas size in CSS pixels. */
@@ -348,6 +410,10 @@ export interface ViewerEvents {
   view: ViewInfo;
   /** A viewer plugin was installed (`plugins` option or `use`). */
   pluginInstalled: { name: string; instance: PluginInstance };
+  /** A viewer plugin was removed (`removePlugin`), after its `dispose()`. Not emitted by `viewer.dispose()`. */
+  pluginRemoved: { name: string; instance: PluginInstance };
+  /** A context menu was requested (see `ContextMenuRequest`). */
+  contextMenu: ContextMenuRequest;
 }
 
 export interface ViewerLoadProgress {
@@ -434,8 +500,17 @@ export interface ViewerApi {
   setVisible(objectIds: ObjectSelection, visible: boolean): void;
   /** Show only these objects; everything else is ghosted (or hidden when `hideOthers`). */
   isolate(objectIds: ObjectSelection | null, hideOthers?: boolean): void;
-  /** Override colour; `null` restores the material colour. */
+  /**
+   * Colour override of every mesh of these objects (sRGB; an optional 4th component is the blend
+   * strength over the material colour, default 1; opacity is never changed). `null` removes the
+   * override, restoring the material colour.
+   */
   setColor(objectIds: ObjectSelection, color: Color | null): void;
+  /**
+   * The colour override of an object as set by `setColor` ([r, g, b, strength], sRGB, rounded to 6
+   * decimals), or null when it has none or does not exist. Reads the object's first mesh.
+   */
+  getColor(objectId: number): [number, number, number, number] | null;
   select(objectIds: ArrayLike<number>): void;
   getSelection(): number[];
   showAll(): void;
@@ -525,8 +600,29 @@ export interface ViewerApi {
   use<T extends PluginInstance>(plugin: ViewerPlugin<T>): T;
   /** The instance of an installed plugin, or undefined. */
   getPlugin<T = PluginInstance>(name: string): T | undefined;
+  /**
+   * Uninstalls a viewer plugin: calls its `dispose()`, removes what it registered through its
+   * `PluginContext` (context menu items) and emits `pluginRemoved` (the built-in UI then runs the
+   * cleanup its `ui()` hook returned). Returns false when no plugin of that name is installed.
+   */
+  removePlugin(name: string): boolean;
   /** Names of the installed viewer plugins, in install order. */
   readonly plugins: readonly string[];
+
+  // --- context menu ---
+  /**
+   * Adds an entry to the canvas context menu (right click without drag; long press on touch).
+   * Returns a function that removes it. Plugins should use `PluginContext.addContextMenuItem`, which
+   * also removes the entry when the plugin is removed. The viewer only collects the entries and
+   * emits `contextMenu`; the built-in UI (`createViewerUi`) draws the menu.
+   */
+  addContextMenuItem(item: ContextMenuItem): () => void;
+  /**
+   * Opens the context menu as a right click at canvas CSS pixel (x, y) would: picks, selects the
+   * object under the point when it is not selected (see `ContextMenuContext.selection`) and emits
+   * `contextMenu`. Resolves with the emitted request, or null when superseded by a newer request.
+   */
+  openContextMenu(x: number, y: number, pointerType?: string): Promise<ContextMenuRequest | null>;
 
   // --- lifecycle ---
   on<K extends keyof ViewerEvents>(event: K, handler: (payload: ViewerEvents[K]) => void): () => void;

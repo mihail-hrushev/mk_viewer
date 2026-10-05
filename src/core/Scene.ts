@@ -18,7 +18,7 @@ import { FragmentList } from './FragmentList';
 import { GeometryStore, type GeometryStoreOptions } from './GeometryStore';
 import { MaterialStore } from './MaterialStore';
 import { PagePool, type PagePoolOptions } from './Pages';
-import { srgbToLinear } from './coremath';
+import { linearToSrgb, srgbToLinear } from './coremath';
 import { grow } from './util';
 
 export interface SceneOptions extends BatcherOptions {
@@ -282,6 +282,21 @@ export class Scene {
       for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) fr.setColor(f, r, g, b, a);
     };
     forEachObject(objectIds, one);
+  }
+
+  /**
+   * Colour override of an object's first alive mesh into out (sRGB rgb + strength). False when the
+   * object has no mesh or no override.
+   */
+  getColor(objectId: number, out: Float64Array | number[]): boolean {
+    const f = this.fragments.firstOfObject(objectId);
+    if (f < 0) return false;
+    this.fragments.getColor(f, out);
+    if (!(out[3] > 0)) return false;
+    out[0] = linearToSrgb(out[0]);
+    out[1] = linearToSrgb(out[1]);
+    out[2] = linearToSrgb(out[2]);
+    return true;
   }
 
   /** Replaces the selection. */

@@ -39,6 +39,10 @@ export type {
   ToolPointerInfo,
   ToolEndReason,
   ViewInfo,
+  ContextMenuContext,
+  ContextMenuItem,
+  ContextMenuEntry,
+  ContextMenuRequest,
   CameraState,
   SectionPlane,
   EnvironmentSource,
@@ -62,7 +66,7 @@ export * from './loaders';
 export * from './ui';
 /**
  * Viewer plugins: tools and UI additions installed with `new Viewer(canvas, { plugins: [...] })` or
- * `viewer.use(plugin)` (see src/plugins/README.md), and the built-in measurement plugin.
+ * `viewer.use(plugin)` (see docs/PLUGIN_API.md), and the built-in measurement and colour plugins.
  */
 export * from './plugins';
 /** Raw GeometryData generators (positions/normals/indices) for users who build their own data. */

@@ -61,7 +61,7 @@ export interface MeasureOptions {
   edgeAngle?: number;
   /** Line colour (CSS). Default orange. */
   color?: string;
-  /** Add the "Measure" toolbar button and menu item to the built-in UI. Default true. */
+  /** Add the "Measure" toolbar button (built-in UI) and the "Clear measurements" menu entry. Default true. */
   ui?: boolean;
 }
 
@@ -165,6 +165,14 @@ class MeasureController implements MeasurePlugin {
     };
     // overlays follow the camera inside the animation frame (no lag, nothing when idle)
     this.offView = this.viewer.on('view', () => this.render());
+    // context menu entry, owned by the plugin (removed with it); drawn by the built-in UI or the app
+    if (options.ui !== false) {
+      context.addContextMenuItem({
+        label: 'Clear measurements',
+        enabled: () => this.list.length > 0,
+        onClick: () => this.clear(),
+      });
+    }
   }
 
   // --- API ------------------------------------------------------------------------------------
@@ -242,14 +250,8 @@ class MeasureController implements MeasurePlugin {
     });
     toggle.on = this.isActive;
     this.toggleButton = toggle;
-    const removeItem = ui.addMenuItem({
-      label: 'Clear measurements',
-      enabled: () => this.list.length > 0,
-      onClick: () => this.clear(),
-    });
     const cleanup = (): void => {
       toggle.remove();
-      removeItem();
       if (this.toggleButton === toggle) this.toggleButton = null;
       if (this.uiCleanup === cleanup) this.uiCleanup = null;
     };

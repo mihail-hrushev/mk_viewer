@@ -5,8 +5,9 @@
  * its name and model (ctrl/shift-click toggles objects in the selection).
  *
  * It is also the reference for registering viewer plugins at startup: the built-in measurement
- * tool (`measurePlugin`, toolbar button "Measure") and a small third-party plugin written against
- * the public API only (./section-plugin.ts, toolbar button "Cut").
+ * tool (`measurePlugin`, toolbar button "Measure"), the colour plugin (`colorPlugin`, right-click
+ * menu entries "Red" and "Reset colour") and a small third-party plugin written against the public
+ * API only (./section-plugin.ts, toolbar button "Cut").
  *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
  *
@@ -15,7 +16,7 @@
  * .hdr file can also be opened or dropped like a model), edges=1 (edge display on; the toolbar
  * button "Edges" switches it).
  */
-import { Viewer, createViewerUi, gltfLoader, measurePlugin, objLoader, type MeasurePlugin } from '../src/index';
+import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
@@ -24,7 +25,8 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   up: params.get('up') === 'y' ? 'y' : 'z',
   loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin()],
+  // colorPlugin adds "Red" and "Reset colour" to the right-click menu
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin()],
 });
 // built-in UI: bottom toolbar, movable Tree and Models panels, right-click menu
 const ui = createViewerUi(viewer);

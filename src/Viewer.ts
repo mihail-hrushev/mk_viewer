@@ -38,6 +38,10 @@
 import type {
   CameraState,
   Color,
+  ContextMenuContext,
+  ContextMenuEntry,
+  ContextMenuItem,
+  ContextMenuRequest,
   EdgeInfo,
   EdgeOptions,
   EnvironmentInfo,
@@ -96,6 +100,13 @@ const SNAP_RADIUS_TOUCH_PX = 24;
 const DEFAULT_EDGE_ANGLE = 20;
 
 type Listener<K extends keyof ViewerEvents> = (payload: ViewerEvents[K]) => void;
+
+/** An installed viewer plugin and the cleanups of what it registered through its context. */
+interface PluginEntry {
+  name: string;
+  instance: PluginInstance;
+  owned: (() => void)[];
+}
 
 /** A running `load()`. */
 interface LoadEntry {
@@ -188,6 +199,8 @@ export class Viewer implements ViewerApi {
     environment: new Set(),
     view: new Set(),
     pluginInstalled: new Set(),
+    pluginRemoved: new Set(),
+    contextMenu: new Set(),
   };
   private lastCamera: CameraState | null = null;
   /** Camera (origin-relative) and canvas size at the last `view` event: eye, target, up, fov, ortho, w, h. */
@@ -198,10 +211,15 @@ export class Viewer implements ViewerApi {
   private toolCursor = '';
   /** The active tool was told about the pointer being over the canvas (onPointerMove). */
   private toolHover = false;
-  private readonly pluginEntries: { name: string; instance: PluginInstance }[] = [];
+  private readonly pluginEntries: PluginEntry[] = [];
   private pluginNames: readonly string[] | null = null;
   private layer: CanvasLayer | null = null;
   private disposing = false;
+
+  // context menu entries (registration order) and the latest request (newer ones supersede it)
+  private readonly menuItems: ContextMenuItem[] = [];
+  private menuRequest = 0;
+  private readonly colorTmp = new Float64Array(4);
 
   // snapping
   private readonly snapper: Snapper;
@@ -586,6 +604,14 @@ export class Viewer implements ViewerApi {
   setColor(objectIds: ObjectSelection, color: Color | null): void {
     this.scene.setColor(objectIds, color);
     this.renderer.invalidateImage();
+  }
+
+  getColor(objectId: number): [number, number, number, number] | null {
+    const c = this.colorTmp;
+    if (!this.scene.getColor(objectId, c)) return null;
+    // stored as float32 linear: round so that the values given to setColor come back exactly
+    const r6 = (x: number): number => Math.round(x * 1e6) / 1e6;
+    return [r6(c[0]), r6(c[1]), r6(c[2]), r6(c[3])];
   }
 
   select(objectIds: ArrayLike<number>): void {
@@ -1021,17 +1047,33 @@ export class Viewer implements ViewerApi {
     if (this.pluginEntries.some((p) => p.name === name)) {
       throw new Error(`mk-viewer: a viewer plugin named '${name}' is already installed`);
     }
-    const context: PluginContext = { viewer: this, overlay: () => this.pluginLayer() };
+    const owned: (() => void)[] = [];
+    const context: PluginContext = {
+      viewer: this,
+      name,
+      overlay: () => this.pluginLayer(),
+      addContextMenuItem: (item) => {
+        const remove = this.addContextMenuItem(item);
+        const off = (): void => {
+          const i = owned.indexOf(off);
+          if (i >= 0) owned.splice(i, 1);
+          remove();
+        };
+        owned.push(off);
+        return off;
+      },
+    };
     let result: T | void;
     try {
       result = plugin.install(context);
     } catch (e) {
+      runCleanups(owned, name);
       const err = new Error(`mk-viewer: viewer plugin '${name}' failed to install: ${e instanceof Error ? e.message : String(e)}`);
       (err as { cause?: unknown }).cause = e;
       throw err;
     }
     const instance = (result ?? {}) as T;
-    this.pluginEntries.push({ name, instance });
+    this.pluginEntries.push({ name, instance, owned });
     this.pluginNames = null;
     this.emit('pluginInstalled', { name, instance });
     return instance;
@@ -1040,6 +1082,109 @@ export class Viewer implements ViewerApi {
   getPlugin<T = PluginInstance>(name: string): T | undefined {
     for (const p of this.pluginEntries) if (p.name === name) return p.instance as unknown as T;
     return undefined;
+  }
+
+  removePlugin(name: string): boolean {
+    const i = this.pluginEntries.findIndex((p) => p.name === name);
+    if (i < 0) return false;
+    const [entry] = this.pluginEntries.splice(i, 1);
+    this.pluginNames = null;
+    disposePlugin(entry);
+    this.emit('pluginRemoved', { name, instance: entry.instance });
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // context menu
+
+  addContextMenuItem(item: ContextMenuItem): () => void {
+    if (!item || typeof item.label !== 'string' || typeof item.onClick !== 'function') {
+      throw new TypeError('mk-viewer: a context menu item needs a string `label` and an `onClick(context)` function');
+    }
+    this.menuItems.push(item);
+    return () => {
+      const i = this.menuItems.indexOf(item);
+      if (i >= 0) this.menuItems.splice(i, 1);
+    };
+  }
+
+  async openContextMenu(x: number, y: number, pointerType = 'mouse'): Promise<ContextMenuRequest | null> {
+    if (this.disposed) return null;
+    const request = ++this.menuRequest;
+    let hit: PickResult | null = null;
+    try {
+      hit = await this.pick(x, y);
+    } catch {
+      hit = null;
+    }
+    if (request !== this.menuRequest || this.disposed) return null;
+    return this.contextMenuAt(x, y, pointerType, hit);
+  }
+
+  /**
+   * @internal The part of `openContextMenu` after the pick: select-on-right-click, collecting the
+   * items, the `contextMenu` event. Used by the unit tests (no GPU pick in node).
+   */
+  contextMenuAt(x: number, y: number, pointerType: string, hit: PickResult | null): ContextMenuRequest {
+    let selection = this.scene.getSelection();
+    // a right click on an object outside the selection acts on that object (not while a tool is
+    // active: clicks never select then)
+    if (hit && this.autoSelect && !this.tool && !selection.includes(hit.objectId)) {
+      selection = [hit.objectId];
+      this.select(selection);
+    }
+    const context: ContextMenuContext = Object.freeze({ x, y, pointerType, hit, selection: Object.freeze(selection) });
+    const listed: { item: ContextMenuItem; order: number; seq: number }[] = [];
+    const items = this.menuItems.slice(); // callbacks may add / remove items
+    for (let k = 0; k < items.length; k++) {
+      const item = items[k];
+      let visible = true;
+      try {
+        visible = item.visible ? item.visible(context) !== false : true;
+      } catch (e) {
+        console.error(`mk-viewer: error in visible() of context menu item '${item.label}'`, e);
+        visible = false;
+      }
+      if (visible) listed.push({ item, order: Number.isFinite(item.order) ? item.order! : 0, seq: k });
+    }
+    listed.sort((a, b) => a.order - b.order || a.seq - b.seq);
+    const entries: ContextMenuEntry[] = listed.map(({ item, order }) => {
+      let enabled = true;
+      try {
+        enabled = item.enabled ? item.enabled(context) !== false : true;
+      } catch (e) {
+        console.error(`mk-viewer: error in enabled() of context menu item '${item.label}'`, e);
+        enabled = false;
+      }
+      const entry: ContextMenuEntry = {
+        label: item.label,
+        order,
+        enabled,
+        run: () => {
+          if (!enabled) return;
+          try {
+            item.onClick(context);
+          } catch (e) {
+            console.error(`mk-viewer: error in context menu item '${item.label}'`, e);
+          }
+        },
+      };
+      if (item.title !== undefined) (entry as { title?: string }).title = item.title;
+      return Object.freeze(entry);
+    });
+    let prevented = false;
+    const req: ContextMenuRequest = {
+      ...context,
+      items: Object.freeze(entries),
+      preventDefault: () => {
+        prevented = true;
+      },
+      get defaultPrevented() {
+        return prevented;
+      },
+    };
+    this.emit('contextMenu', req);
+    return req;
   }
 
   get plugins(): readonly string[] {
@@ -1104,20 +1249,31 @@ export class Viewer implements ViewerApi {
     e.preventDefault();
   };
 
-  /** Registered before any UI menu, so a tool can consume the right click (stopImmediatePropagation). */
+  /**
+   * Right click (long press on touch) that was not the end of a right-button pan: first to the
+   * active tool, which may consume it (stopImmediatePropagation also keeps it from listeners added
+   * after the viewer), then the context menu. Without items or `contextMenu` listeners the event is
+   * left alone (the controls, when installed, still suppress the browser menu).
+   */
   private readonly onContextMenu = (e: MouseEvent): void => {
+    if (this.controls?.dragged) return;
     const t = this.tool;
-    if (!t || !t.onContextMenu || this.controls?.dragged) return;
-    let consumed = false;
-    try {
-      consumed = t.onContextMenu(e.offsetX, e.offsetY) === true;
-    } catch (err) {
-      console.error(`mk-viewer: error in tool '${t.name}' onContextMenu`, err);
+    if (t && t.onContextMenu) {
+      let consumed = false;
+      try {
+        consumed = t.onContextMenu(e.offsetX, e.offsetY) === true;
+      } catch (err) {
+        console.error(`mk-viewer: error in tool '${t.name}' onContextMenu`, err);
+      }
+      if (consumed) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
     }
-    if (consumed) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
+    if (this.menuItems.length === 0 && this.listeners.contextMenu.size === 0) return;
+    e.preventDefault();
+    this.openContextMenu(e.offsetX, e.offsetY, (e as PointerEvent).pointerType || 'mouse').catch(() => undefined);
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -1157,15 +1313,11 @@ export class Viewer implements ViewerApi {
     this.disposing = true;
     // plugins first, in reverse install order, while the viewer still works
     const plugins = this.pluginEntries;
-    for (let i = plugins.length - 1; i >= 0; i--) {
-      try {
-        plugins[i].instance.dispose?.();
-      } catch (e) {
-        console.error(`mk-viewer: error disposing viewer plugin '${plugins[i].name}'`, e);
-      }
-    }
+    for (let i = plugins.length - 1; i >= 0; i--) disposePlugin(plugins[i]);
     plugins.length = 0;
     this.pluginNames = null;
+    this.menuItems.length = 0;
+    this.menuRequest++;
     this.endTool('dispose');
     this.layer?.dispose();
     this.layer = null;
@@ -1524,6 +1676,28 @@ function edgeOptions(o: EdgeOptions): EdgeInfo {
     throw new RangeError(`mk-viewer: edge creaseAngle must be in (0, 180) degrees, got ${creaseAngle}`);
   }
   return { color, opacity, creaseAngle };
+}
+
+/** Calls a plugin's dispose(), then removes what it registered through its context. */
+function disposePlugin(entry: PluginEntry): void {
+  try {
+    entry.instance.dispose?.();
+  } catch (e) {
+    console.error(`mk-viewer: error disposing viewer plugin '${entry.name}'`, e);
+  }
+  runCleanups(entry.owned, entry.name);
+}
+
+/** Runs and empties a plugin's context-owned cleanups, newest first. */
+function runCleanups(owned: (() => void)[], name: string): void {
+  const list = owned.splice(0);
+  for (let i = list.length - 1; i >= 0; i--) {
+    try {
+      list[i]();
+    } catch (e) {
+      console.error(`mk-viewer: error removing a registration of viewer plugin '${name}'`, e);
+    }
+  }
 }
 
 function isEditable(t: EventTarget | null): boolean {

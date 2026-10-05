@@ -216,6 +216,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     },
     isolate() {},
     setColor() {},
+    getColor: () => null,
     select() {},
     getSelection: () => [],
     showAll() {
@@ -235,7 +236,10 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
       throw new Error('mock: no viewer plugins');
     },
     getPlugin: () => undefined,
+    removePlugin: () => false,
     plugins: [],
+    addContextMenuItem: () => () => {},
+    openContextMenu: async () => null,
     setSectionPlanes() {},
     setEnvironment: async () => {},
     getEnvironment: () => null,

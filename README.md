@@ -218,7 +218,8 @@ viewer.setColor(sel(), palette[paint++ % palette.length]);
 ```
 
 `setColor(ids, null)` restores the material colour, and a 4th component blends the override
-(`[1, 1, 1, 0.7]` is 70 % white over the material). `showAll()` ends isolation and shows hidden
+(`[1, 1, 1, 0.7]` is 70 % white over the material). `getColor(id)` returns an object's override, or
+null when it has none. `showAll()` ends isolation and shows hidden
 objects. Ids for your own data should not collide with loaded models: `allocObjectIds(n)` reserves a
 range no model will receive (model ids start at 2^30).
 
@@ -238,8 +239,9 @@ changes. `await viewer.pick(x, y)` picks at canvas CSS pixels yourself;
 edge within a screen tolerance (see [viewer plugins](#viewer-plugins-and-the-measurement-tool)).
 `viewer.worldToScreen(point)` projects a world point to canvas CSS pixels. Other events: `camera`,
 `view` (camera or canvas size changed, inside the animation frame: for positioning overlay DOM),
-`frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`, `pluginInstalled`. `on()` returns
-an unsubscribe function.
+`frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`, `pluginInstalled`,
+`pluginRemoved`, `contextMenu` (see [the built-in toolbar](#built-in-toolbar-and-model-tree)). `on()`
+returns an unsubscribe function.
 
 ### Camera
 
@@ -432,20 +434,26 @@ Two kinds of plugins, not to be confused:
 | purpose | read a file format in `viewer.load()` | add behaviour and UI: tools, overlays, buttons |
 | registered with | `loaders: [...]`, `registerLoader()` | `plugins: [...]`, `viewer.use()` |
 | lifetime | one load | the viewer's lifetime |
-| guide | [`src/loaders/README.md`](src/loaders/README.md) | [`src/plugins/README.md`](src/plugins/README.md) |
+| guide | [`src/loaders/README.md`](src/loaders/README.md) | [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) |
 
-A viewer plugin is `{ name, install(context) }`; `install` gets the `ViewerApi` and returns the
-plugin's own API, optionally with a `ui(ui)` hook (called when the built-in UI exists) and
-`dispose()`. Applications register plugins at startup, as
+A viewer plugin is `{ name, install(context) }`; `install` gets the `ViewerApi` (plus a shared
+overlay layer and context menu entries owned by the plugin) and returns the plugin's own API,
+optionally with a `ui(ui)` hook (called when the built-in UI exists) and `dispose()`.
+`viewer.removePlugin(name)` uninstalls one. Applications register plugins at startup, as
 [examples/models.ts](examples/models.ts) does:
 
 ```ts
 const viewer = new Viewer(canvas, {
   loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin()],
+  // colorPlugin adds "Red" and "Reset colour" to the right-click menu
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin()],
 });
 ```
+
+**Writing your own:** [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md) describes the lifecycle, everything a
+plugin can use (events, picking, snapping, tools, overlays, the context menu, colour overrides, the
+built-in UI) and the rules, with the colour plugin as a worked example.
 
 ```ts
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!; // the plugin's own API
@@ -466,6 +474,11 @@ points (the magnet is larger). Headless: `measure.add(a, b)`, `measure.measureme
 `remove(id)`, `clear()`, `on('created', fn)`. Options: `unit`, `decimals`, `format`, `deltas`,
 `snapRadius`, `edgeAngle`, `color`. Measurements are in world coordinates: they stay when models
 are hidden or unloaded and do not follow `model.setTransform`.
+
+**Colour** (`colorPlugin`): right-click an object and choose **Red** to colour it (and everything
+else selected); **Reset colour** restores the material colour. Headless: `apply(ids?)`,
+`reset(ids?)`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`, `name`. The
+colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 ## Controls
 
@@ -517,10 +530,15 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - Both panels are `.mkv-panel` windows: drag the header to move them; they stay inside the canvas.
   `new Panel(ui.element, { title, dock, height })` creates more of them for your own content.
 - **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
-- A right click on the canvas (long press on touch) opens a menu with **Hide selected**,
-  **Hide unselected** and **Show all**. Right-clicking an object that is not selected selects it
-  first; a right-button drag still pans. Add your own entries with
-  `ui.addMenuItem({ label, onClick: (selection) => ... })`.
+- A right click on the canvas (long press on touch, where the browser reports one) opens a menu
+  with **Hide selected**, **Hide unselected**, **Show all** and the entries of viewer plugins.
+  Right-clicking an object that is not selected selects it first (with `autoSelect`); a
+  right-button drag still pans. The menu closes on a click outside it, Escape, wheel, scrolling and
+  camera movement. Entries are collected by the viewer, so they exist with or without this UI:
+  `viewer.addContextMenuItem({ label, onClick: (c) => ..., enabled?, visible?, order? })` (the
+  callbacks get the selection, the object under the pointer and the position), or the shorter
+  `ui.addMenuItem({ label, onClick: (selection) => ... })`. To draw your own menu, handle the
+  `contextMenu` event and call `req.preventDefault()`.
 - `ui.addToggle({ label, onClick })` adds an on / off toolbar button whose state you set
   (`toggle.on = true`). Viewer plugins add their buttons through their `ui(ui)` hook, so they
   appear whether the UI is created before or after the plugin is installed.
@@ -653,7 +671,8 @@ npm run typecheck  # tsc --noEmit
 npm run build      # dist/: ES module + UMD + source maps + d.ts
 ```
 
-Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Loader plugins:
+Architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Viewer plugins:
+[`docs/PLUGIN_API.md`](docs/PLUGIN_API.md). Loader plugins:
 [`src/loaders/README.md`](src/loaders/README.md).
 
 ## License

@@ -117,3 +117,9 @@ export function srgbToLinear(c: number): number {
   c = c < 0 ? 0 : c > 1 ? 1 : c;
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
+
+/** Linear -> sRGB transfer function, input clamped to 0..1 (inverse of srgbToLinear). */
+export function linearToSrgb(c: number): number {
+  c = c < 0 ? 0 : c > 1 ? 1 : c;
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}

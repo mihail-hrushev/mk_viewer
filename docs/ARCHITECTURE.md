@@ -26,6 +26,8 @@ src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, d
                    GLSL sources (uber-shader), async pixel reader
 src/render/        Renderer: progressive frame loop, passes, picking, overlays
 src/loaders/       model loader plugins: contract, registry, loadModel, glTF + OBJ plugins, scheduler
+src/plugins/       viewer plugin contract, overlay layer, built-in plugins (measure, color); public API only
+src/ui/            optional built-in UI (toolbar, panels, context menu drawing); public API only
 src/Viewer.ts      public Viewer class implementing ViewerApi (incl. model loading / federation)
 src/index.ts       library entry (exports Viewer, loaders, primitives and the public types)
 examples/          demo pages served by `npm run dev` (public API only; examples/index.html lists them)
@@ -172,6 +174,22 @@ with the fragment matrix in float64 origin-relative space, and the nearest verte
 (boundary or crease, adjacency by quantized end points) is chosen by its distance to the view ray.
 Plugin overlays (measurement lines) are DOM over the canvas positioned with `worldToScreen` in the
 `view` event, which the renderer's camera-change hook emits inside the frame before presenting.
+
+## Viewer plugins and the context menu
+
+Viewer plugins (`src/plugins/`, guide: [`PLUGIN_API.md`](PLUGIN_API.md)) are `{ name, install(context) }`
+objects installed by `ViewerOptions.plugins` / `use()` and removed by `removePlugin()` or
+`dispose()`. The context gives the public `ViewerApi`, the shared overlay layer and
+`addContextMenuItem`; the viewer keeps the removers of what a plugin registered through its context
+and runs them after the plugin's `dispose()`. Plugins use the public API only (built-in ones too).
+
+The context menu is split in two. The viewer (DOM-free) owns the entries and the decision: a
+`contextmenu` event that was not the end of a right-button pan (`controls.dragged`) and was not
+consumed by the active tool is picked, selects the object under the pointer when it is outside the
+selection (`autoSelect`, no tool), evaluates every entry's `visible` / `enabled` once and emits
+`contextMenu` with the listed entries. The built-in UI's `ContextMenu` only draws such a request (in a
+microtask, so any handler may `preventDefault()` to draw its own) and closes on outside press,
+Escape, wheel, scroll and the `view` event. Nothing runs per frame.
 
 ## Input
 

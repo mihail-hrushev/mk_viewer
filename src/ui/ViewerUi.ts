@@ -37,7 +37,10 @@ export interface ViewerUi {
   readonly hierarchy: HierarchyPanel;
   /** Models panel: open files, running loads, per-model show / hide / fit / isolate / unload. */
   readonly models: ModelsPanel;
-  /** Right-click menu of the canvas (Hide selected, Hide unselected, Show all). */
+  /**
+   * Draws the canvas context menu (`contextMenu` requests of the viewer) and adds its own entries
+   * Hide selected, Hide unselected and Show all (order -100).
+   */
   readonly menu: ContextMenu;
   /** Appends a button to the toolbar and returns it. */
   addButton(button: ToolbarButton): HTMLButtonElement;
@@ -46,7 +49,11 @@ export interface ViewerUi {
    * `toggle.on` to show the state, so it stays right when the state changes elsewhere (Escape, API).
    */
   addToggle(button: { label: string; title?: string; onClick: () => void }): ToolbarToggle;
-  /** Appends an item to the right-click menu; returns a function that removes it. */
+  /**
+   * Adds an item to the context menu that only needs the selection; returns a function that removes
+   * it (also removed by `dispose()`). Plugins should prefer `PluginContext.addContextMenuItem`,
+   * which works without the built-in UI and gets the pointer position and the object under it.
+   */
   addMenuItem(item: MenuItem): () => void;
   dispose(): void;
 }
@@ -140,8 +147,10 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
 
   const menu = new ContextMenu(viewer, overlay);
   const hasSelection = (sel: number[]): boolean => sel.length > 0;
+  // built-in entries come first (order -100); plugin entries default to order 0
   menu.addItem({
     label: 'Hide selected',
+    order: -100,
     enabled: hasSelection,
     onClick: (sel) => {
       viewer.setVisible(sel, false);
@@ -149,22 +158,38 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     },
   });
   // hides everything else and keeps the selection, so it can be refined further
-  menu.addItem({ label: 'Hide unselected', enabled: hasSelection, onClick: (sel) => viewer.isolate(sel, true) });
-  menu.addItem({ label: 'Show all', onClick: () => viewer.showAll() });
+  menu.addItem({ label: 'Hide unselected', order: -100, enabled: hasSelection, onClick: (sel) => viewer.isolate(sel, true) });
+  menu.addItem({ label: 'Show all', order: -100, onClick: () => viewer.showAll() });
 
-  // viewer plugins: those installed already, and any installed later
-  const pluginCleanups: (() => void)[] = [];
+  // viewer plugins: those installed already, and any installed later; a removed plugin's cleanup
+  // runs at once
+  const pluginCleanups: { name: string; cleanup: () => void }[] = [];
+  const runCleanup = (name: string, cleanup: () => void): void => {
+    try {
+      cleanup();
+    } catch (e) {
+      console.error(`mk-viewer: error removing the UI of viewer plugin '${name}'`, e);
+    }
+  };
   const attach = (name: string): void => {
     const inst = viewer.getPlugin(name);
     if (!inst || typeof inst.ui !== 'function') return;
     try {
       const cleanup = inst.ui(ui);
-      if (typeof cleanup === 'function') pluginCleanups.push(cleanup);
+      if (typeof cleanup === 'function') pluginCleanups.push({ name, cleanup });
     } catch (e) {
       console.error(`mk-viewer: error in the ui() hook of viewer plugin '${name}'`, e);
     }
   };
-  let offPlugins: (() => void) | null = null;
+  const detach = (name: string): void => {
+    for (let i = pluginCleanups.length - 1; i >= 0; i--) {
+      const p = pluginCleanups[i];
+      if (p.name !== name) continue;
+      pluginCleanups.splice(i, 1);
+      runCleanup(name, p.cleanup);
+    }
+  };
+  let offPlugins: (() => void)[] = [];
 
   const ui: ViewerUi = {
     element: overlay,
@@ -176,15 +201,9 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     addToggle,
     addMenuItem: (item) => menu.addItem(item),
     dispose() {
-      offPlugins?.();
-      for (let i = pluginCleanups.length - 1; i >= 0; i--) {
-        try {
-          pluginCleanups[i]();
-        } catch (e) {
-          console.error('mk-viewer: error removing a viewer plugin UI', e);
-        }
-      }
-      pluginCleanups.length = 0;
+      for (const off of offPlugins) off();
+      offPlugins = [];
+      for (const p of pluginCleanups.splice(0).reverse()) runCleanup(p.name, p.cleanup);
       observer.disconnect();
       win?.removeEventListener('resize', place);
       win?.removeEventListener('scroll', place, true);
@@ -195,6 +214,6 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     },
   };
   for (const name of viewer.plugins) attach(name);
-  offPlugins = viewer.on('pluginInstalled', (p) => attach(p.name));
+  offPlugins = [viewer.on('pluginInstalled', (p) => attach(p.name)), viewer.on('pluginRemoved', (p) => detach(p.name))];
   return ui;
 }
