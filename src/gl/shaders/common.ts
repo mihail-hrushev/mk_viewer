@@ -84,6 +84,19 @@ vec3 octDecode(vec2 e) {
 }
 `;
 
+/**
+ * Octahedral encode of a unit vector to [-1, 1]^2 (inverse of OCT_DECODE). Used for the face
+ * normal attachment of the edge display.
+ */
+export const OCT_ENCODE = /* glsl */ `
+vec2 octEncode(vec3 n) {
+  n /= abs(n.x) + abs(n.y) + abs(n.z);
+  vec2 e = n.xy;
+  if (n.z < 0.0) e = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+  return e;
+}
+`;
+
 /** Packs a u32 into RGBA8 output (exact: k / 255 round-trips through UNORM8). */
 export const PACK_U32 = /* glsl */ `
 vec4 packU32(uint v) {

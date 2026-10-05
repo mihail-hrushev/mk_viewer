@@ -37,11 +37,14 @@
  *   u_sectionPlaneCount int       (SECTION_PLANES variant only)
  *   u_sectionPlanes    vec4[MAX_SECTION_PLANES]  view space, discard where dot(xyz, p) + w > 0
  *
- * Outputs: location 0 o_color (sRGB-encoded RGBA8), location 1 o_id (fragment index + 1, RGBA8).
+ * Outputs: location 0 o_color (sRGB-encoded RGBA8), location 1 o_id (fragment index + 1, RGBA8);
+ * EDGES variant only: location 2 o_normal (RG8, octahedral view-space face normal, see
+ * OCT_ENCODE), the input of the edge display in COMPOSITE_FS.
  */
 import {
   LAYOUT_CONSTANTS,
   OCT_DECODE,
+  OCT_ENCODE,
   PACK_U32,
   PRECISION,
   RECORD_ADDRESSING,
@@ -61,6 +64,12 @@ export interface UberShaderOptions {
    * bit-for-bit the shader it was (a runtime branch changed the compiler's float evaluation order).
    */
   environment?: boolean;
+  /**
+   * Also write the geometric face normal (from screen-space derivatives of the view position, so
+   * coplanar triangles share it exactly) to location 2 for the edge display. Compile-time, so the
+   * default program writes nothing extra.
+   */
+  edges?: boolean;
 }
 
 const UBER_VS = /* glsl */ `
@@ -178,12 +187,18 @@ flat in uint v_material;
 
 layout(location = 0) out vec4 o_color;
 layout(location = 1) out vec4 o_id;
+#ifdef EDGES
+layout(location = 2) out vec4 o_normal;
+#endif
 
 const float PI = 3.14159265;
 
 ${RECORD_ADDRESSING}
 ${PACK_U32}
 ${SRGB}
+#ifdef EDGES
+${OCT_ENCODE}
+#endif
 
 vec3 hemisphere(vec3 dir) {
   return mix(u_groundColor, u_skyColor, dot(dir, u_upView) * 0.5 + 0.5);
@@ -208,6 +223,17 @@ vec3 envRadiance(vec3 d, float lod) {
 #endif
 
 void main() {
+#ifdef EDGES
+  // Face normal from the derivatives (taken before any discard: derivatives need the whole quad).
+  // Every pixel of a triangle gets the same normal, and so do coplanar neighbours: their shared
+  // diagonal leaves no trace. Faced towards the viewer like the shading normal.
+  vec3 fn = cross(dFdx(v_viewPos), dFdy(v_viewPos));
+  float fl = dot(fn, fn);
+  fn = fl > 1e-30 ? fn * inversesqrt(fl) : normalize(v_normal);
+  vec3 fv = u_orthographic != 0 ? vec3(0.0, 0.0, 1.0) : -v_viewPos;
+  if (dot(fn, fv) < 0.0) fn = -fn;
+  o_normal = vec4(octEncode(fn) * 0.5 + 0.5, 0.0, 0.0);
+#endif
 #ifdef SECTION_PLANES
   for (int i = 0; i < MAX_SECTION_PLANES; ++i) {
     if (i >= u_sectionPlaneCount) break;
@@ -302,7 +328,11 @@ export function uberVertexSource(): string {
 }
 
 export function uberFragmentSource(options: UberShaderOptions = {}): string {
-  return assembleShader(UBER_FS, { SECTION_PLANES: !!options.sectionPlanes, ENVIRONMENT: !!options.environment });
+  return assembleShader(UBER_FS, {
+    SECTION_PLANES: !!options.sectionPlanes,
+    ENVIRONMENT: !!options.environment,
+    EDGES: !!options.edges,
+  });
 }
 
 /** Pass kinds for u_passKind. */

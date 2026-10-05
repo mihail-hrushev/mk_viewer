@@ -1,13 +1,13 @@
 /**
- * Fullscreen passes: present (1:1 copy of the colour target), background gradient and selection
- * outline. Each draw binds its program, textures (units 0..1) and an empty VAO, then draws one
- * triangle. Framebuffer, viewport, blending and depth state are set by the caller (see recipes in
+ * Fullscreen passes: present (1:1 copy of the colour target), composite (present + selection
+ * overlay, optionally the edge display), background gradient and selection outline. Each draw binds
+ * its program, textures (units 0..4) and an empty VAO, then draws one triangle. Framebuffer, viewport, blending and depth state are set by the caller (see recipes in
  * the method docs).
  */
 import type { GlContext, GlResource } from './GlContext';
 import { Program } from './Program';
 import { FULLSCREEN_VS } from './shaders/common';
-import { BACKGROUND_FS, COMPOSITE_FS, OUTLINE_FS, PRESENT_FS } from './shaders/post';
+import { BACKGROUND_FS, COMPOSITE_FS, OUTLINE_FS, PRESENT_FS, compositeFragmentSource } from './shaders/post';
 
 /** Selection / hover overlay settings of `drawComposite`. */
 export interface OverlayStyle {
@@ -21,9 +21,28 @@ export interface OverlayStyle {
   outlineWidth: number;
 }
 
+/** Edge display settings of `drawComposite` (see COMPOSITE_FS, EDGES variant). */
+export interface EdgeStyle {
+  /** sRGB rgb + opacity of the lines. */
+  color: ArrayLike<number>;
+  /** Cosine of the crease angle: neighbouring face normals with a smaller dot product get a line. */
+  cosAngle: number;
+  /** Clip planes and projection the depth target was rendered with. */
+  near: number;
+  far: number;
+  orthographic: boolean;
+  /** World size of one target pixel at view distance 1 (perspective) or anywhere (orthographic). */
+  pixelSize: number;
+  depthTex: WebGLTexture | null;
+  /** Face normals (RenderTargets normal attachment). */
+  normalTex: WebGLTexture | null;
+}
+
 export class PostPasses implements GlResource {
   readonly present: Program;
   readonly composite: Program;
+  /** Composite with the edge display, compiled on first use. */
+  private compositeEdges: Program | null = null;
   readonly background: Program;
   readonly outline: Program;
   private vao: WebGLVertexArrayObject;
@@ -61,9 +80,22 @@ export class PostPasses implements GlResource {
     this.drawFullscreen();
   }
 
+  /** Compiles the edge-display composite program ahead of its first use (outside the frame loop). */
+  prepareEdges(): void {
+    if (this.compositeEdges) return;
+    const p = new Program(this.ctx, FULLSCREEN_VS, compositeFragmentSource({ edges: true }), 'composite+edges');
+    p.setSampler('u_colorTex', 0);
+    p.setSampler('u_idTex', 1);
+    p.setSampler('u_fragTex', 2);
+    p.setSampler('u_depthTex', 3);
+    p.setSampler('u_normalTex', 4);
+    this.compositeEdges = p;
+  }
+
   /**
    * Like drawPresent, plus the selection / hover overlay (tint from the id target + fragment flags,
-   * selection outline), see COMPOSITE_FS. Same recipe as drawPresent. Uses texture units 0..2.
+   * selection outline), see COMPOSITE_FS, and the edge display when `edges` is given. Same recipe
+   * as drawPresent. Uses texture units 0..2 (0..4 with edges).
    */
   drawComposite(
     colorTex: WebGLTexture,
@@ -72,18 +104,30 @@ export class PostPasses implements GlResource {
     style: OverlayStyle,
     offsetX = 0,
     offsetY = 0,
+    edges: EdgeStyle | null = null,
   ): void {
-    const p = this.composite.use();
+    if (edges) this.prepareEdges();
+    const p = edges ? this.compositeEdges!.use() : this.composite.use();
     const s = style.selectionTint, h = style.highlightTint, o = style.outlineColor;
     p.setVec4('u_selectionColor', s[0], s[1], s[2], s[3]);
     p.setVec4('u_highlightColor', h[0], h[1], h[2], h[3]);
     p.setVec4('u_outlineColor', o[0], o[1], o[2], o[3] ?? 1);
-    p.setInt('u_outlineWidth', Math.max(0, style.outlineWidth | 0));
+    const outline = Math.max(0, style.outlineWidth | 0);
+    p.setInt('u_outlineWidth', outline);
+    p.setInt('u_overlay', s[3] > 0 || h[3] > 0 || outline > 0 ? 1 : 0);
     p.setIvec2('u_offset', offsetX, offsetY);
     const st = this.ctx.state;
     st.bindTexture(0, colorTex);
     st.bindTexture(1, idTex);
     st.bindTexture(2, fragTex);
+    if (edges) {
+      const c = edges.color;
+      p.setVec4('u_edgeColor', c[0], c[1], c[2], c[3] ?? 1);
+      p.setVec4('u_edgeParams', edges.cosAngle, edges.near, edges.far, edges.orthographic ? 1 : 0);
+      p.setFloat('u_edgePixel', edges.pixelSize);
+      st.bindTexture(3, edges.depthTex);
+      st.bindTexture(4, edges.normalTex);
+    }
     this.drawFullscreen();
   }
 
@@ -132,6 +176,7 @@ export class PostPasses implements GlResource {
     this.ctx.gl.deleteVertexArray(this.vao);
     this.present.dispose();
     this.composite.dispose();
+    this.compositeEdges?.dispose();
     this.background.dispose();
     this.outline.dispose();
     this.ctx.untrack(this);

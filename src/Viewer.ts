@@ -38,6 +38,8 @@
 import type {
   CameraState,
   Color,
+  EdgeInfo,
+  EdgeOptions,
   EnvironmentInfo,
   EnvironmentOptions,
   EnvironmentSource,
@@ -215,6 +217,9 @@ export class Viewer implements ViewerApi {
   private envPrepared: PreparedEnvironment | null = null;
   private envInfo: EnvironmentInfo | null = null;
 
+  // edge display (null = off)
+  private edgeInfo: EdgeInfo | null = null;
+
   // pointer / hover
   private hoverInFlight = false;
   private hoverX = -1;
@@ -301,6 +306,7 @@ export class Viewer implements ViewerApi {
     this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
     this.resizeObserver?.observe(canvas);
     this.resize();
+    if (options.edges) this.setEdges(true, options.edges === true ? {} : options.edges);
     if (options.environment != null) {
       this.setEnvironment(options.environment, options.environmentOptions).catch((e) =>
         console.error('mk-viewer: the environment could not be loaded', e),
@@ -968,6 +974,23 @@ export class Viewer implements ViewerApi {
     return this.envInfo ? { ...this.envInfo } : null;
   }
 
+  setEdges(enabled: boolean, options: EdgeOptions = {}): void {
+    if (this.disposed) return;
+    if (!enabled) {
+      this.edgeInfo = null;
+      this.renderer.setEdges(null);
+      return;
+    }
+    const info = edgeOptions(options);
+    this.edgeInfo = info;
+    this.renderer.setEdges(info);
+  }
+
+  getEdges(): EdgeInfo | null {
+    const e = this.edgeInfo;
+    return e ? { color: [e.color[0], e.color[1], e.color[2]], opacity: e.opacity, creaseAngle: e.creaseAngle } : null;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // tools and viewer plugins
 
@@ -1488,6 +1511,19 @@ function environmentOptions(o: EnvironmentOptions): { intensity: number; rotatio
   if (!Number.isFinite(rotation)) throw new RangeError(`mk-viewer: invalid environment rotation ${rotation}`);
   if (!(keyLight >= 0 && keyLight <= 1)) throw new RangeError(`mk-viewer: environment keyLight must be in 0..1, got ${keyLight}`);
   return { intensity, rotation, keyLight };
+}
+
+function edgeOptions(o: EdgeOptions): EdgeInfo {
+  const c = o.color ?? [0.1, 0.1, 0.1];
+  const color: [number, number, number] = [+c[0], +c[1], +c[2]];
+  const opacity = o.opacity ?? 0.75;
+  const creaseAngle = o.creaseAngle ?? 20;
+  if (!color.every((v) => v >= 0 && v <= 1)) throw new RangeError(`mk-viewer: edge color components must be in 0..1, got ${color}`);
+  if (!(opacity >= 0 && opacity <= 1)) throw new RangeError(`mk-viewer: edge opacity must be in 0..1, got ${opacity}`);
+  if (!(creaseAngle > 0 && creaseAngle < 180)) {
+    throw new RangeError(`mk-viewer: edge creaseAngle must be in (0, 180) degrees, got ${creaseAngle}`);
+  }
+  return { color, opacity, creaseAngle };
 }
 
 function isEditable(t: EventTarget | null): boolean {

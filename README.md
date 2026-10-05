@@ -303,6 +303,37 @@ new Viewer(canvas, { environment: 'studio', environmentOptions: { keyLight: 0.3 
   and uses about 1.4 MB of GPU memory (RGBA16F with mips). Shading adds one texture lookup and a
   short polynomial per pixel. With no environment set, the default shader runs unchanged.
 
+### Edge display
+
+`setEdges` draws thin dark lines along the real edges of what is on screen: creases where faces meet
+at more than `creaseAngle`, silhouettes and occlusion edges, and the boundary between two touching
+meshes. The diagonal of a flat quad never shows, and neither do the facets of finely tessellated
+curved surfaces. Default off.
+
+```ts
+viewer.setEdges(true);                                                   // defaults
+viewer.setEdges(true, { color: [0.1, 0.1, 0.1], opacity: 0.75, creaseAngle: 20 });
+viewer.setEdges(false);
+viewer.getEdges();                                // { color, opacity, creaseAngle } | null
+new Viewer(canvas, { edges: true });              // or edges: { creaseAngle: 30 }
+```
+
+- Options: `color` (sRGB, default dark grey), `opacity` (0..1, default 0.75), `creaseAngle`
+  (degrees, default 20, the same as the snapping default `edgeAngle`).
+- Lines are found in screen space while the image is presented, from the depth, a face-normal and
+  the id buffer, so the cost does not depend on the triangle count. Lines are about one device
+  pixel wide at any pixel ratio, with a soft second pixel against staircasing. They follow the
+  progressive image: a partly drawn image has lines for what is drawn so far.
+- Switching edges on or off redraws the image; changing colour, opacity or angle only re-composites
+  it. Selection tint applies under the lines, the selection outline over them.
+- Transparent objects get lines on their nearest surface, which hides the lines of what is behind
+  them. Ghosted objects get no lines. In very dense, distant views (a whole factory zoomed out)
+  the lines can cover much of the image.
+- Cost while on: a 2-byte-per-pixel render target (4 MB at 1920x1080) written by the scene passes,
+  and about 0.2 ms more GPU time per presented frame at 1600x900 on an RTX 2000 Ada laptop GPU.
+  While off, nothing extra is allocated or run. `examples/models.html` has an Edges toolbar button
+  (`?edges=1` to start with it), `examples/stress.html` an edges checkbox.
+
 ### Stats
 
 `viewer.stats` gives `fps`, `frameMs` (CPU), `gpuMs` (GPU time of the scene passes, when the browser

@@ -3,6 +3,11 @@
  * depth (DEPTH_COMPONENT32F texture, falls back to DEPTH_COMPONENT24). All attachments are
  * textures so post passes and the pick resolve can sample them.
  *
+ * Optional normal attachment (`setNormals(true)`, COLOR_ATTACHMENT2, RG8): the octahedral-encoded
+ * view-space face normal written by the uber-shader's EDGES variant, read by the edge display in
+ * the composite pass. It only exists while enabled (2 bytes per pixel); the 'all' and 'id' draw
+ * buffer modes then include it.
+ *
  * Nothing here clears implicitly: the target keeps its content across frames, which is what the
  * progressive renderer needs (clear only when restarting the image).
  */
@@ -18,6 +23,10 @@ export class RenderTargets implements GlResource {
   colorTex: WebGLTexture | null = null;
   idTex: WebGLTexture | null = null;
   depthTex: WebGLTexture | null = null;
+  /** Face normal attachment (RG8, octahedral), only while `hasNormals`. */
+  normalTex: WebGLTexture | null = null;
+  /** The normal attachment is enabled (`setNormals`). */
+  hasNormals = false;
   /** DEPTH_COMPONENT32F or DEPTH_COMPONENT24, whichever made the framebuffer complete. */
   depthFormat = 0;
 
@@ -26,6 +35,10 @@ export class RenderTargets implements GlResource {
   private readonly buffersColor: number[];
   private readonly buffersId: number[];
   private readonly buffersNone: number[];
+  private readonly buffersAllN: number[];
+  private readonly buffersColorN: number[];
+  private readonly buffersIdN: number[];
+  private readonly buffersNoneN: number[];
   private readonly clearColor = new Float32Array(4);
   private readonly clearZero = new Float32Array(4);
   private readonly clearDepthValue = new Float32Array([1]);
@@ -36,12 +49,27 @@ export class RenderTargets implements GlResource {
     this.buffersColor = [gl.COLOR_ATTACHMENT0, gl.NONE];
     this.buffersId = [gl.NONE, gl.COLOR_ATTACHMENT1];
     this.buffersNone = [gl.NONE, gl.NONE];
+    this.buffersAllN = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2];
+    this.buffersColorN = [gl.COLOR_ATTACHMENT0, gl.NONE, gl.NONE];
+    this.buffersIdN = [gl.NONE, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2];
+    this.buffersNoneN = [gl.NONE, gl.NONE, gl.NONE];
     this.framebuffer = this.createFramebuffer();
     ctx.track(this);
   }
 
   get byteSize(): number {
-    return this.width * this.height * 12;
+    return this.width * this.height * (this.hasNormals ? 14 : 12);
+  }
+
+  /**
+   * Adds or removes the normal attachment. Reallocates all attachments when it changes (content is
+   * lost: restart the image). Returns true when it changed.
+   */
+  setNormals(enabled: boolean): boolean {
+    if (enabled === this.hasNormals) return false;
+    this.hasNormals = enabled;
+    if (this.width > 0) this.allocate();
+    return true;
   }
 
   /**
@@ -67,19 +95,21 @@ export class RenderTargets implements GlResource {
   /**
    * Selects which attachments fragment outputs go to (target must be bound):
    * 'all' = colour + id (opaque pass), 'color' = colour only (blended passes, background),
-   * 'id' = id only (e.g. a transparent pick pass), 'none' = depth only.
+   * 'id' = id only (e.g. a transparent pick pass), 'none' = depth only. With the normal attachment,
+   * 'all' and 'id' also write normals.
    */
   setDrawBuffers(mode: DrawBufferMode): void {
     if (this.drawMode === mode) return;
     this.drawMode = mode;
+    const n = this.hasNormals;
     const list =
       mode === 'all'
-        ? this.buffersAll
+        ? n ? this.buffersAllN : this.buffersAll
         : mode === 'color'
-          ? this.buffersColor
+          ? n ? this.buffersColorN : this.buffersColor
           : mode === 'id'
-            ? this.buffersId
-            : this.buffersNone;
+            ? n ? this.buffersIdN : this.buffersId
+            : n ? this.buffersNoneN : this.buffersNone;
     this.ctx.gl.drawBuffers(list);
   }
 
@@ -98,16 +128,20 @@ export class RenderTargets implements GlResource {
     this.clearColor[3] = a;
     gl.clearBufferfv(gl.COLOR, 0, this.clearColor);
     gl.clearBufferfv(gl.COLOR, 1, this.clearZero);
+    if (this.hasNormals) gl.clearBufferfv(gl.COLOR, 2, this.clearZero);
     gl.clearBufferfv(gl.DEPTH, 0, this.clearDepthValue);
   }
 
-  /** Clears id and depth only (colour is about to be overwritten, e.g. by the background pass). */
+  /**
+   * Clears id, normals and depth (colour is about to be overwritten, e.g. by the background pass).
+   */
   clearIdAndDepth(): void {
     const gl = this.ctx.gl;
     this.bind();
     this.setDrawBuffers('all');
     this.ctx.state.setDepthMask(true);
     gl.clearBufferfv(gl.COLOR, 1, this.clearZero);
+    if (this.hasNormals) gl.clearBufferfv(gl.COLOR, 2, this.clearZero);
     gl.clearBufferfv(gl.DEPTH, 0, this.clearDepthValue);
   }
 
@@ -131,7 +165,7 @@ export class RenderTargets implements GlResource {
 
   restore(): void {
     this.framebuffer = this.createFramebuffer();
-    this.colorTex = this.idTex = this.depthTex = null;
+    this.colorTex = this.idTex = this.depthTex = this.normalTex = null;
     this.allocatedBytes = 0;
     this.drawMode = null;
     const w = this.width;
@@ -156,13 +190,13 @@ export class RenderTargets implements GlResource {
 
   private deleteTextures(): void {
     const gl = this.ctx.gl;
-    for (const t of [this.colorTex, this.idTex, this.depthTex]) {
+    for (const t of [this.colorTex, this.idTex, this.depthTex, this.normalTex]) {
       if (t) {
         this.ctx.state.forgetTexture(t);
         gl.deleteTexture(t);
       }
     }
-    this.colorTex = this.idTex = this.depthTex = null;
+    this.colorTex = this.idTex = this.depthTex = this.normalTex = null;
     this.ctx.memory.renderTargets = Math.max(0, this.ctx.memory.renderTargets - this.allocatedBytes);
     this.allocatedBytes = 0;
   }
@@ -192,6 +226,8 @@ export class RenderTargets implements GlResource {
     state.bindFramebuffer(this.framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.colorTex, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, this.idTex, 0);
+    if (this.hasNormals) this.normalTex = this.makeTexture(gl.RG8);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, this.normalTex, 0);
 
     let status = 0;
     for (const fmt of [gl.DEPTH_COMPONENT32F, gl.DEPTH_COMPONENT24]) {

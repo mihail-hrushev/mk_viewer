@@ -7,6 +7,7 @@
  *   glass=0.1   fraction of the unique meshes with a transparent material (default 0)
  *   secs=8      length of the scripted camera path of the benchmark
  *   dpr=1       pixel ratio cap (default: min(devicePixelRatio, 2))
+ *   edges=1     edge display on (viewer.setEdges)
  *   bench=1     run the benchmark as soon as the first image is complete
  *
  * The benchmark result is shown on screen and stored as `window.benchmark` (JSON-compatible).
@@ -24,15 +25,18 @@ const DPR = params.has('dpr') ? num('dpr', 1) : undefined;
 
 const canvas = $<HTMLCanvasElement>('c');
 const errors = captureErrors($('errors'));
-const viewer = new Viewer(canvas, { pixelRatio: DPR });
+const viewer = new Viewer(canvas, { pixelRatio: DPR, edges: params.get('edges') === '1' });
 
 // --- form -------------------------------------------------------------------------------------------
 $<HTMLInputElement>('n').value = String(N);
 $<HTMLInputElement>('m').value = String(M);
 $<HTMLInputElement>('glass').value = String(GLASS);
+$<HTMLInputElement>('edges').checked = viewer.getEdges() !== null;
 $('build').onclick = () => {
   const q = new URLSearchParams(location.search);
   for (const k of ['n', 'm', 'glass']) q.set(k, $<HTMLInputElement>(k).value);
+  if ($<HTMLInputElement>('edges').checked) q.set('edges', '1');
+  else q.delete('edges');
   q.delete('bench');
   location.search = q.toString();
 };
@@ -166,6 +170,7 @@ async function benchmark() {
     canvas: `${canvas.width}x${canvas.height}`,
     devicePixelRatio,
     scene: { instanced: N, unique: M, glassFraction: GLASS, meshes: s.meshes, triangles: s.triangles },
+    edges: viewer.getEdges() !== null,
     buildMs: Math.round(buildMs),
     firstPixelsMs: Math.round(firstPixelsMs),
     firstCompleteMs: Math.round(firstCompleteMs),

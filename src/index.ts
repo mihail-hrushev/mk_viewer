@@ -45,6 +45,8 @@ export type {
   EnvironmentImage,
   EnvironmentOptions,
   EnvironmentInfo,
+  EdgeOptions,
+  EdgeInfo,
   ViewerStats,
   ViewerEvents,
   Primitives,

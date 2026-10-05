@@ -239,6 +239,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     setSectionPlanes() {},
     setEnvironment: async () => {},
     getEnvironment: () => null,
+    setEdges: () => {},
+    getEdges: () => null,
     on: () => () => {},
     resize() {},
     invalidate() {},

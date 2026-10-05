@@ -53,6 +53,7 @@ import {
   applyPassState,
   planesToViewSpace,
   unprojectDepth,
+  type EdgeStyle,
   type EnvironmentUniforms,
   type GlContext,
   type OverlayStyle,
@@ -73,6 +74,16 @@ export interface RenderEnvironmentOptions {
   rotation: number;
   /** 0..1 */
   keyLight: number;
+}
+
+/** Edge display settings (validated by the Viewer). */
+export interface RenderEdgeOptions {
+  /** sRGB rgb. */
+  color: ArrayLike<number>;
+  /** 0..1 */
+  opacity: number;
+  /** Crease angle, degrees. */
+  creaseAngle: number;
 }
 
 export interface RendererOptions {
@@ -168,11 +179,11 @@ export class Renderer {
   lastMode = 'idle';
 
   private readonly gl: WebGL2RenderingContext;
-  private readonly uber: UberProgram;
-  private uberSection: UberProgram | null = null;
-  /** Environment-lighting variants, created when an environment is first set. */
-  private uberEnv: UberProgram | null = null;
-  private uberEnvSection: UberProgram | null = null;
+  /**
+   * Uber-shader variants by key (1 = section planes, 2 = environment, 4 = edges / normal output),
+   * created when first needed; [0] is the default program.
+   */
+  private readonly variants: (UberProgram | null)[] = [null, null, null, null, null, null, null, null];
   private prog: UberProgram;
   private readonly post: PostPasses;
   private readonly reader: PixelReader;
@@ -244,6 +255,20 @@ export class Renderer {
   private readonly offRestored: () => void;
   private background: [Float32Array, Float32Array];
   private readonly overlayScratch: OverlayStyle = { selectionTint: [], highlightTint: [], outlineColor: [], outlineWidth: 0 };
+  private static readonly NO_TINT = [0, 0, 0, 0];
+
+  // edge display (null = off); the camera parameters are those of the current image
+  private edges: RenderEdgeOptions | null = null;
+  private readonly edgeStyle: EdgeStyle = {
+    color: new Float32Array(4),
+    cosAngle: 0,
+    near: 0,
+    far: 1,
+    orthographic: false,
+    pixelSize: 0,
+    depthTex: null,
+    normalTex: null,
+  };
 
   // image-based lighting
   private readonly envTex: EnvironmentTexture;
@@ -263,8 +288,7 @@ export class Renderer {
   ) {
     this.gl = ctx.gl;
     this.gpu = new GpuScene(ctx);
-    this.uber = new UberProgram(ctx);
-    this.prog = this.uber;
+    this.prog = this.variants[0] = new UberProgram(ctx);
     this.targets = new RenderTargets(ctx);
     this.post = new PostPasses(ctx);
     this.reader = new PixelReader(ctx);
@@ -367,32 +391,54 @@ export class Renderer {
       m.set([c, 0, -s, 0, 1, 0, s, 0, c]);
     }
     this.ensurePrograms();
-    this.uberEnv?.setEnvironment(this.envUniforms);
-    this.uberEnvSection?.setEnvironment(this.envUniforms);
+    for (const v of this.variants) v?.setEnvironment(this.envUniforms);
     this.invalidateImage();
   }
 
-  /** Compiles the program variants the current settings need (outside the frame loop). */
+  /**
+   * Edge display (screen-space lines at creases, silhouettes and mesh boundaries, drawn in the
+   * composite pass), or null for off. Switching it on or off adds / removes the normal attachment and
+   * restarts the image; changing only colour / opacity / angle re-presents the current image.
+   */
+  setEdges(options: RenderEdgeOptions | null): void {
+    const was = this.edges !== null;
+    this.edges = options;
+    const st = this.edgeStyle;
+    if (options) {
+      const c = st.color as Float32Array;
+      c[0] = options.color[0];
+      c[1] = options.color[1];
+      c[2] = options.color[2];
+      c[3] = options.opacity;
+      st.cosAngle = Math.cos((options.creaseAngle * Math.PI) / 180);
+      this.post.prepareEdges();
+    }
+    if (this.targets.setNormals(options !== null) || was !== (options !== null)) {
+      this.ensurePrograms();
+      this.invalidateImage();
+    } else {
+      this.invalidatePresent();
+    }
+  }
+
+  /** Variant key of the current settings (see `variants`). */
+  private variantKey(): number {
+    return (this.sectionCount > 0 ? 1 : 0) | (this.envUniforms ? 2 : 0) | (this.edges ? 4 : 0);
+  }
+
+  /** Compiles the program variant the current settings need (outside the frame loop). */
   private ensurePrograms(): void {
-    const sec = this.sectionCount > 0;
-    const env = this.envUniforms !== null;
-    if (sec && !env && !this.uberSection) this.uberSection = new UberProgram(this.ctx, { sectionPlanes: true });
-    if (env && !sec && !this.uberEnv) {
-      this.uberEnv = new UberProgram(this.ctx, { environment: true });
-      this.uberEnv.setEnvironment(this.envUniforms);
-    }
-    if (env && sec && !this.uberEnvSection) {
-      this.uberEnvSection = new UberProgram(this.ctx, { sectionPlanes: true, environment: true });
-      this.uberEnvSection.setEnvironment(this.envUniforms);
-    }
+    const k = this.variantKey();
+    if (this.variants[k]) return;
+    const v = new UberProgram(this.ctx, { sectionPlanes: (k & 1) !== 0, environment: (k & 2) !== 0, edges: (k & 4) !== 0 });
+    if (k & 2) v.setEnvironment(this.envUniforms);
+    this.variants[k] = v;
   }
 
   /** The program variant for the current settings. */
   private selectProgram(): UberProgram {
     this.ensurePrograms();
-    const sec = this.sectionCount > 0;
-    if (this.envUniforms) return sec ? this.uberEnvSection! : this.uberEnv!;
-    return sec ? this.uberSection! : this.uber;
+    return this.variants[this.variantKey()]!;
   }
 
   /** GPU pick at CSS pixel coordinates relative to the canvas. */
@@ -435,10 +481,7 @@ export class Renderer {
     this.raf = 0;
     this.offRestored();
     this.gpu.dispose();
-    this.uber.dispose();
-    this.uberSection?.dispose();
-    this.uberEnv?.dispose();
-    this.uberEnvSection?.dispose();
+    for (const v of this.variants) v?.dispose();
     this.targets.dispose();
     this.post.dispose();
     this.reader.dispose();
@@ -672,6 +715,12 @@ export class Renderer {
     const cam = this.camera;
     this.imgInvViewProj.set(cam.inverseViewProjection64);
     this.imgEye.set(cam.eye);
+    // the edge display linearizes this image's depth with this image's projection
+    const es = this.edgeStyle;
+    es.near = cam.near;
+    es.far = cam.far;
+    es.orthographic = cam.orthographic;
+    es.pixelSize = 1 / cam.pixelFactor;
 
     // clear + background
     const t = this.targets;
@@ -1110,17 +1159,25 @@ export class Renderer {
     s.setBlend(false);
     const t = this.targets;
     const sel = this.host.selectionCount > 0;
-    if (sel || this.host.highlightActive) {
+    const edges = this.edges !== null && t.normalTex !== null;
+    if (sel || this.host.highlightActive || edges) {
       // outline width is in target pixels: scale with the device pixel ratio
       const canvas = this.ctx.canvas as HTMLCanvasElement;
       const dpr = t.height / (canvas.clientHeight || t.height);
       const o = this.overlay;
       const width = sel && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * (dpr > 0 ? dpr : 1))) : 0;
-      this.overlayScratch.selectionTint = o.selectionTint;
-      this.overlayScratch.highlightTint = o.highlightTint;
+      const tint = sel || this.host.highlightActive;
+      this.overlayScratch.selectionTint = tint ? o.selectionTint : Renderer.NO_TINT;
+      this.overlayScratch.highlightTint = tint ? o.highlightTint : Renderer.NO_TINT;
       this.overlayScratch.outlineColor = o.outlineColor;
       this.overlayScratch.outlineWidth = width;
-      this.post.drawComposite(t.colorTex!, t.idTex!, this.gpu.fragTex.texture, this.overlayScratch);
+      let es: EdgeStyle | null = null;
+      if (edges) {
+        es = this.edgeStyle;
+        es.depthTex = t.depthTex;
+        es.normalTex = t.normalTex;
+      }
+      this.post.drawComposite(t.colorTex!, t.idTex!, this.gpu.fragTex.texture, this.overlayScratch, 0, 0, es);
     } else {
       this.post.drawPresent(t.colorTex!);
     }

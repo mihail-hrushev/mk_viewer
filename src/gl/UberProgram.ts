@@ -1,7 +1,7 @@
 /**
  * Typed wrapper around the uber-shader Program: cached uniform locations, pass presets and frame
  * uniforms. One instance per variant (with / without section planes, with / without environment
- * lighting).
+ * lighting, with / without the face normal output of the edge display).
  */
 import { FragFlags, MAX_SECTION_PLANES } from '../layout';
 import type { GlContext } from './GlContext';
@@ -57,6 +57,8 @@ export class UberProgram {
   readonly program: Program;
   readonly hasSectionPlanes: boolean;
   readonly hasEnvironment: boolean;
+  /** Writes face normals to location 2 (edge display; the targets need the normal attachment). */
+  readonly hasEdges: boolean;
   private readonly sectionScratch = new Float32Array(MAX_SECTION_PLANES * 4);
 
   private uFlagMask: WebGLUniformLocation | null = null;
@@ -77,15 +79,16 @@ export class UberProgram {
 
   constructor(
     private readonly ctx: GlContext,
-    options: { sectionPlanes?: boolean; environment?: boolean } = {},
+    options: { sectionPlanes?: boolean; environment?: boolean; edges?: boolean } = {},
   ) {
     this.hasSectionPlanes = !!options.sectionPlanes;
     this.hasEnvironment = !!options.environment;
+    this.hasEdges = !!options.edges;
     this.program = new Program(
       ctx,
       uberVertexSource(),
-      uberFragmentSource({ sectionPlanes: this.hasSectionPlanes, environment: this.hasEnvironment }),
-      'uber' + (this.hasSectionPlanes ? '+section' : '') + (this.hasEnvironment ? '+env' : ''),
+      uberFragmentSource({ sectionPlanes: this.hasSectionPlanes, environment: this.hasEnvironment, edges: this.hasEdges }),
+      'uber' + (this.hasSectionPlanes ? '+section' : '') + (this.hasEnvironment ? '+env' : '') + (this.hasEdges ? '+edges' : ''),
     );
     this.program.setSampler('u_fragTex', UBER_FRAG_TEX_UNIT);
     this.program.setSampler('u_matTex', UBER_MAT_TEX_UNIT);
@@ -278,9 +281,9 @@ export class UberProgram {
 
 /**
  * Applies the GL state of a scene pass (scene target must be bound with `targets.bind()`):
- *  - opaque:        depth test LESS, depth write, no blend, drawBuffers all
+ *  - opaque:        depth test LESS, depth write, no blend, drawBuffers all (+ normals)
  *  - transparent:   depth test LEQUAL, no depth write, blend ONE / ONE_MINUS_SRC_ALPHA, drawBuffers color
- *  - transparentId: depth test LEQUAL, depth write, no blend, drawBuffers id
+ *  - transparentId: depth test LEQUAL, depth write, no blend, drawBuffers id (+ normals)
  *  - ghost:         same as transparent
  */
 export function applyPassState(

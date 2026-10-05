@@ -141,6 +141,18 @@ renderer consumes it over several frames.
 Rendering goes to an offscreen target (colour + id + depth) that is blitted to the canvas, which is
 what makes accumulation across frames possible.
 
+**Edge display** (`setEdges`) is screen-space and costs nothing while off. On, it adds an RG8 normal
+attachment (`RenderTargets.setNormals`) written by an `EDGES` variant of the uber-shader (variants
+are keyed by section planes / environment / edges): the octahedral view-space face normal from
+`dFdx`/`dFdy` of the view position, so coplanar triangles share it exactly and diagonals vanish.
+The 'all' and 'id' draw-buffer modes include it, so the transparent-id pass writes the normals of
+the nearest transparent surface together with its depth and id. Lines are computed at present time
+by the `EDGES` variant of `COMPOSITE_FS` from depth (as 1 / view depth, linear across planes, so a
+step is compared with the steps beside it), normals (crease angle) and ids (touching meshes). Since
+they are derived from whatever the targets hold when presenting, they are right on partial
+progressive images and never accumulate; colour / angle changes only re-present. Near / far /
+projection used for linearizing are snapshotted per image.
+
 ## Picking and overlays
 
 The id attachment stores fragment index + 1. `pick()` reads one pixel asynchronously (PBO +

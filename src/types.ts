@@ -65,6 +65,8 @@ export interface ViewerOptions {
   environment?: EnvironmentSource;
   /** Options for `environment`. */
   environmentOptions?: EnvironmentOptions;
+  /** Edge display from the start: `true` for the defaults, or its options (see `setEdges`). Default off. */
+  edges?: boolean | EdgeOptions;
   /**
    * Viewer plugins (tools, overlays, UI additions; see src/plugins/README.md), installed in this
    * order at the end of construction. Not to be confused with `loaders` (file format plugins).
@@ -103,6 +105,26 @@ export interface EnvironmentOptions {
    * headlight keeps shapes readable from every side. Default 0.25.
    */
   keyLight?: number;
+}
+
+/** Options of the edge display (`setEdges`). */
+export interface EdgeOptions {
+  /** sRGB line colour. Default [0.1, 0.1, 0.1]. */
+  color?: Color;
+  /** 0..1, how strongly lines cover the surface colour. Default 0.75. */
+  opacity?: number;
+  /**
+   * Faces meeting at an angle (between their normals, degrees) below this get no line, so curved
+   * surfaces stay clean. Same meaning and default as `SnapOptions.edgeAngle`. Default 20.
+   */
+  creaseAngle?: number;
+}
+
+/** The active edge display settings (`getEdges`). */
+export interface EdgeInfo {
+  color: [number, number, number];
+  opacity: number;
+  creaseAngle: number;
 }
 
 /** The active environment (`getEnvironment`, `environment` event). */
@@ -475,6 +497,17 @@ export interface ViewerApi {
   setEnvironment(source: EnvironmentSource | null, options?: EnvironmentOptions): Promise<void>;
   /** The active environment, or null for the default lighting. */
   getEnvironment(): EnvironmentInfo | null;
+  /**
+   * Edge display ("display edges"): thin dark lines along the real edges of the visible surfaces -
+   * creases sharper than `creaseAngle`, silhouettes, and boundaries between touching meshes -
+   * but never along the diagonals of flat faces. Computed in screen space while presenting, so it
+   * does not depend on triangle counts; switching it on costs one extra 2-byte-per-pixel render
+   * target and a little more work in the final pass. Omitted options take their defaults. Default
+   * off.
+   */
+  setEdges(enabled: boolean, options?: EdgeOptions): void;
+  /** The active edge display settings, or null when edges are off. */
+  getEdges(): EdgeInfo | null;
 
   // --- tools and plugins ---
   /**
