@@ -85,7 +85,7 @@ import { prepareEnvironment, readEnvironmentSource, type PreparedEnvironment } f
 
 const DEFAULT_BACKGROUND: [Color, Color] = [
   [0.86, 0.89, 0.92],
-  [0.6, 0.64, 0.69],
+  [0.7, 0.74, 0.99],
 ];
 const BULK_CHUNK = 32768;
 /** Double click zoom: camera distance from the object's centre, in units of its largest side. */
