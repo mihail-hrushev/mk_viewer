@@ -25,7 +25,10 @@ src/core/          CPU scene data: FragmentList, GeometryStore, MaterialStore, B
 src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, data textures, render targets,
                    GLSL sources (uber-shader), async pixel reader
 src/render/        Renderer: progressive frame loop, passes, picking, overlays
-src/loaders/       model loader plugins: contract, registry, loadModel, glTF + OBJ plugins, scheduler
+src/loaders/       model loader plugins: contract, registry, loadModel, glTF + OBJ plugins, scheduler,
+                   HierarchyStore (columnar metadata tree)
+src/metadata/      PropertyIndex (dictionary-encoded property columns + postings over the hierarchy),
+                   sorted-set helpers
 src/plugins/       viewer plugin contract, overlay layer, built-in plugins (measure, color); public API only
 src/ui/            optional built-in UI (toolbar, panels, context menu drawing); public API only
 src/Viewer.ts      public Viewer class implementing ViewerApi (incl. model loading / federation)
@@ -118,6 +121,46 @@ browsers: all loads together get half the frame interval (8..50 ms) per animatio
 frame batches and uploads a bounded amount of new content and the picture fills in progressively.
 The first model is framed progressively while it loads (until the user moves the camera); later
 models never move the camera unless asked.
+
+## Metadata and the property index
+
+The metadata of a model is a tree, not per-object records. `HierarchyStore` (`src/loaders/hierarchy.ts`)
+keeps it columnar: a parent column, an objectId column (NaN for group nodes), and names and
+properties that are either stored sparsely in maps or resolved lazily through per-batch callbacks
+(the glTF plugin keeps its parsed `nodes` array and answers `name(i)` / `properties(i)` from it, so
+nothing is copied). Children (CSR) and the objectId -> node table are built on first use. Files
+like Navisworks or PCF exports put the properties on the *group* nodes (isometric, spool) and leave
+the mesh leaves bare, so `hierarchy.properties(node, inherited)` merges the ancestors on demand,
+nearer nodes winning, instead of copying group data onto every leaf.
+
+`PropertyIndexImpl` (`src/metadata/PropertyIndex.ts`) is the search structure, built from the store
+on the first query (or `model.properties.build()`) and dropped on unload:
+
+- **Preorder layout.** Nodes are numbered in preorder (`order`, `pos`); `end[node]` is the exclusive
+  end of its subtree, so "everything below a node" is one contiguous position range. `preObj`
+  holds the objectIds in preorder with a prefix-count column `objStart`, so the objects under a node
+  are the slice `preObj[objStart[pos] .. objStart[end])` and a match expands to objects without a
+  tree walk. Detached nodes (parent -2) and anything unreachable are appended as their own roots.
+- **One column per key**, dictionary-encoded VertiPaq-style: the distinct values sorted by
+  (lower-case text, text), a parallel lower-case array, the parsed number per value (strict
+  grammar; NaN otherwise; `numeric` when every value parses) and CSR postings `postStart` /
+  `postNode` from value id to the sorted preorder positions of the nodes carrying it. Nested
+  property objects flatten to dotted keys, arrays to repeated values, node names go under the key
+  `name`. Everything after the build is typed arrays plus the string dictionaries.
+- **Queries** resolve a value range in the dictionary by binary search (`equals`, `startsWith`,
+  numeric `min` / `max` over a lazily built numeric order), or, for `in` lists of thousands of
+  values, sort the inputs once and merge-walk them against the dictionary in one linear pass,
+  reporting per input how many nodes matched (the reconciliation most callers need: which spools
+  of the list are not in the model). The matched postings are concatenated, sorted, and expanded to
+  object ranges while skipping positions already covered by a matched ancestor, so nested matches
+  (an isometric and its spools both carrying the key) never duplicate objects. Results are
+  ascending, duplicate-free `Float64Array`s of objectIds that `select`, `isolate`, `setColor` and
+  `fitToView` accept directly; `sortedIntersection` / `sortedUnion` / `sortedDifference` combine
+  them (AND / OR / NOT).
+
+`viewer.findObjects` runs the query on every loaded model and merges the results (ids of
+different models never collide); `viewer.propertyKeys` merges the key lists. For SPOOLS-811
+(5.3k nodes, 14 keys) the index builds in about 13 ms and a 770-value list query takes about 2 ms.
 
 ## Culling and ordering
 

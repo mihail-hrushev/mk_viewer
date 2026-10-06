@@ -1,14 +1,14 @@
 /**
- * Columnar metadata tree: parent indices (Int32Array), objectIds (Float64Array) and names that are
- * either stored sparsely or produced lazily by per-batch callbacks. Children (CSR) and the
- * objectId -> node index are built on first query. No per-node objects.
+ * Columnar metadata tree: parent indices (Int32Array), objectIds (Float64Array), and names and
+ * properties that are either stored sparsely or produced lazily by per-batch callbacks. Children
+ * (CSR) and the objectId -> node index are built on first query. No per-node objects.
  */
-import type { HierarchyBuilder, ModelHierarchy } from './types';
+import type { HierarchyBuilder, ModelHierarchy, NodeProperties } from './types';
 
-interface NameBatch {
+interface Batch<T> {
   start: number;
   count: number;
-  fn: (i: number) => string | undefined;
+  fn: (i: number) => T | undefined;
 }
 
 const EMPTY = new Int32Array(0);
@@ -18,7 +18,9 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
   private oids = new Float64Array(64);
   private n = 0;
   private names = new Map<number, string>();
-  private batches: NameBatch[] = [];
+  private batches: Batch<string>[] = [];
+  private props = new Map<number, NodeProperties>();
+  private propBatches: Batch<NodeProperties>[] = [];
   // lazy indices
   private childStart: Int32Array | null = null;
   private childList: Int32Array | null = null;
@@ -50,18 +52,24 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     this.oidIndex = null;
   }
 
-  addNode(parent: number, name?: string, objectId?: number): number {
+  addNode(parent: number, name?: string, objectId?: number, properties?: NodeProperties): number {
     if (!(parent >= -2 && parent < this.n)) throw new RangeError(`hierarchy: parent ${parent} is not an existing node`);
     this.ensure(1);
     const i = this.n++;
     this.parents[i] = parent;
     this.oids[i] = objectId ?? NaN;
     if (name !== undefined) this.names.set(i, name);
+    if (properties !== undefined) this.props.set(i, properties);
     this.invalidate();
     return i;
   }
 
-  addNodes(parents: ArrayLike<number>, objectIds?: ArrayLike<number>, name?: (i: number) => string | undefined): number {
+  addNodes(
+    parents: ArrayLike<number>,
+    objectIds?: ArrayLike<number>,
+    name?: (i: number) => string | undefined,
+    properties?: (i: number) => NodeProperties | undefined,
+  ): number {
     const k = parents.length;
     const start = this.n;
     this.ensure(k);
@@ -74,6 +82,7 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     }
     this.n = end;
     if (name) this.batches.push({ start, count: k, fn: name });
+    if (properties) this.propBatches.push({ start, count: k, fn: properties });
     this.invalidate();
     return start;
   }
@@ -92,12 +101,32 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     if (!(node >= 0 && node < this.n)) return undefined;
     const s = this.names.get(node);
     if (s !== undefined) return s;
-    const b = this.batches;
-    for (let i = b.length - 1; i >= 0; i--) {
-      const x = b[i];
-      if (node >= x.start && node < x.start + x.count) return x.fn(node - x.start);
+    return lookupBatch(this.batches, node);
+  }
+
+  /** The node's own properties as stored (not copied): internal, for the index. */
+  ownProperties(node: number): NodeProperties | undefined {
+    if (!(node >= 0 && node < this.n)) return undefined;
+    const p = this.props.get(node);
+    if (p !== undefined) return p;
+    return lookupBatch(this.propBatches, node);
+  }
+
+  properties(node: number, inherited = false): NodeProperties | undefined {
+    if (!(node >= 0 && node < this.n)) return undefined;
+    const own = this.ownProperties(node);
+    if (!inherited) return own ? { ...own } : undefined;
+    // ancestors first so nearer nodes overwrite
+    const chain: NodeProperties[] = [];
+    if (own) chain.push(own);
+    for (let p = this.parents[node], guard = 0; p >= 0 && guard < this.n; p = this.parents[p], guard++) {
+      const q = this.ownProperties(p);
+      if (q) chain.push(q);
     }
-    return undefined;
+    if (chain.length === 0) return undefined;
+    const out: NodeProperties = {};
+    for (let i = chain.length - 1; i >= 0; i--) Object.assign(out, chain[i]);
+    return out;
   }
 
   roots(): Int32Array {
@@ -118,10 +147,22 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     return k >= 0 && k < idx.table.length && (k | 0) === k ? idx.table[k] : -1;
   }
 
-  /** Drops lazy name callbacks (and whatever they capture). */
+  /** Raw parent column (length nodeCount): internal, for the index. */
+  parentColumn(): Int32Array {
+    return this.parents.subarray(0, this.n);
+  }
+
+  /** Raw objectId column (length nodeCount): internal, for the index. */
+  objectIdColumn(): Float64Array {
+    return this.oids.subarray(0, this.n);
+  }
+
+  /** Drops lazy name / property callbacks (and whatever they capture) and stored properties. */
   dropNames(): void {
     this.batches = [];
     this.names.clear();
+    this.propBatches = [];
+    this.props.clear();
   }
 
   private buildChildren(): void {
@@ -178,4 +219,12 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     }
     return this.oidIndex;
   }
+}
+
+function lookupBatch<T>(batches: Batch<T>[], node: number): T | undefined {
+  for (let i = batches.length - 1; i >= 0; i--) {
+    const x = batches[i];
+    if (node >= x.start && node < x.start + x.count) return x.fn(node - x.start);
+  }
+  return undefined;
 }

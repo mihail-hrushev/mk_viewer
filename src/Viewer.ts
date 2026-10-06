@@ -62,6 +62,7 @@ import type {
   SnapOptions,
   SnapResult,
   ObjectSelection,
+  PropertySearch,
   ToolEndReason,
   ViewerApi,
   ViewerEvents,
@@ -73,7 +74,7 @@ import type {
 import type { PluginContext, PluginInstance, ViewerPlugin } from './plugins/types';
 import { createCanvasLayer, type CanvasLayer } from './plugins/overlay';
 import { SNAP_EDGE, SNAP_VERTEX, Snapper, type SnapQuery } from './core/snap';
-import type { LoaderInput, LoaderPlugin, LoadTask, Model } from './loaders/types';
+import type { LoaderInput, LoaderPlugin, LoadTask, Model, PropertyKeyInfo, PropertyMatch, PropertyQuery } from './loaders/types';
 import type { LoadContextImpl, ModelImpl } from './loaders/context';
 import { loadModel } from './loaders/loadModel';
 import { defaultRegistry, LoaderRegistry } from './loaders/registry';
@@ -757,6 +758,47 @@ export class Viewer implements ViewerApi {
       list.push(id);
     }
     return out;
+  }
+
+  findObjects(query: PropertyQuery): PropertySearch {
+    const matches: { model: Model; match: PropertyMatch }[] = [];
+    const hits = query.in ? new Int32Array(query.in.length) : null;
+    let total = 0;
+    for (const m of this.loaded) {
+      const match = m.properties.find(query);
+      if (hits && match.hits) for (let i = 0; i < hits.length; i++) hits[i] += match.hits[i];
+      if (match.nodes.length === 0) continue;
+      matches.push({ model: m, match });
+      total += match.objectIds.length;
+    }
+    let objectIds: Float64Array;
+    if (matches.length === 1) objectIds = matches[0].match.objectIds;
+    else {
+      objectIds = new Float64Array(total);
+      let k = 0;
+      for (const { match } of matches) {
+        objectIds.set(match.objectIds, k);
+        k += match.objectIds.length;
+      }
+      if (matches.length > 1) objectIds.sort();
+    }
+    return { objectIds, hits, matches };
+  }
+
+  propertyKeys(): PropertyKeyInfo[] {
+    const merged = new Map<string, PropertyKeyInfo>();
+    for (const m of this.loaded) {
+      for (const k of m.properties.keys()) {
+        const e = merged.get(k.key);
+        if (!e) merged.set(k.key, { ...k });
+        else {
+          e.count += k.count;
+          e.distinct += k.distinct;
+          e.numeric = e.numeric && k.numeric;
+        }
+      }
+    }
+    return Array.from(merged.values()).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
   private modelLoaded(entry: LoadEntry, model: ModelImpl): void {

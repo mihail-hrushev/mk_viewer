@@ -54,8 +54,11 @@ export type {
   ViewerStats,
   ViewerEvents,
   Primitives,
+  PropertySearch,
   ViewerApi,
 } from './types';
+/** Set operations on the sorted id lists that property searches return (AND / OR / NOT). */
+export { sortedIntersection, sortedUnion, sortedDifference } from './metadata/sortedSets';
 /**
  * Model loaders (plugins): registry, loadModel and the built-in glTF / OBJ plugins. Registration is
  * explicit, so unused plugins are tree-shaken: `new Viewer(canvas, { loaders: [gltfLoader] })`,

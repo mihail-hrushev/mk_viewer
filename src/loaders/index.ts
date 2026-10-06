@@ -22,7 +22,12 @@ export type {
   ModelHierarchy,
   ModelInfoExtras,
   ModelStats,
+  NodeProperties,
+  PropertyIndex,
+  PropertyKeyInfo,
+  PropertyMatch,
   PropertyProvider,
+  PropertyQuery,
   ResourceResolver,
   UpAxis,
 } from './types';

@@ -16,10 +16,11 @@ import type {
 } from '../types';
 import { invertAffine } from '../math/mat4';
 import { HierarchyStore } from './hierarchy';
+import { PropertyIndexImpl } from '../metadata/PropertyIndex';
 import { emptyAabb, expandTransformedAabb, identity, multiply } from './mat4d';
 import { allocObjectIds } from './objectIds';
 import { abortError, Slicer } from './scheduler';
-import type { LoadContext, Model, ModelHierarchy, ModelStats, PropertyProvider } from './types';
+import type { LoadContext, Model, ModelHierarchy, ModelStats, PropertyIndex, PropertyProvider } from './types';
 
 const IDENTITY = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -320,6 +321,7 @@ export class ModelImpl implements Model {
   readonly warnings: readonly string[];
   readonly info: Readonly<Record<string, unknown>>;
   readonly hierarchy: ModelHierarchy;
+  readonly properties: PropertyIndex;
   /** Internal: called once by unload() (the Viewer's model registry). */
   onUnload: ((m: ModelImpl) => void) | null = null;
   private _unloaded = false;
@@ -352,6 +354,7 @@ export class ModelImpl implements Model {
     this.provider = ctx.provider;
     this.hstore = ctx.hierarchy;
     this.hierarchy = ctx.hierarchy;
+    this.properties = new PropertyIndexImpl(ctx.hierarchy);
     this.warnings = ctx.warnings;
     this.info = info;
     const b = ctx.bounds;
@@ -509,6 +512,7 @@ export class ModelImpl implements Model {
     // metadata may hold large parsed data (e.g. glTF nodes): drop it even if the app keeps the Model
     this.provider = null;
     this.props = null;
+    (this.properties as PropertyIndexImpl).dispose();
     this.hstore.dropNames();
     const cb = this.onUnload;
     this.onUnload = null;

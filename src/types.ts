@@ -5,7 +5,16 @@
  * colours are sRGB in 0..1, angles are radians.
  */
 
-import type { LoaderInput, LoaderPlugin, LoadOptions, LoadTask, Model } from './loaders/types';
+import type {
+  LoaderInput,
+  LoaderPlugin,
+  LoadOptions,
+  LoadTask,
+  Model,
+  PropertyKeyInfo,
+  PropertyMatch,
+  PropertyQuery,
+} from './loaders/types';
 import type { PluginInstance, ViewerPlugin } from './plugins/types';
 
 export type Vec3 = [number, number, number] | Float32Array;
@@ -416,6 +425,16 @@ export interface ViewerEvents {
   contextMenu: ContextMenuRequest;
 }
 
+/** Result of `viewer.findObjects`: the matches of all loaded models together. */
+export interface PropertySearch {
+  /** objectIds of every match (the matching nodes and everything below them), ascending, no duplicates. */
+  objectIds: Float64Array;
+  /** `in` queries: per input value, the number of matching nodes over all models (0 = not found); else null. */
+  hits: Int32Array | null;
+  /** Per model with at least one match: its own result. */
+  matches: { model: Model; match: PropertyMatch }[];
+}
+
 export interface ViewerLoadProgress {
   task: LoadTask;
   /** File name (or URL path segment) of the input. */
@@ -551,6 +570,16 @@ export interface ViewerApi {
   getModelOf(objectId: number): Model | undefined;
   /** Groups objectIds (e.g. the selection) by owning model; ids of no model go under `null`. */
   groupByModel(objectIds: ArrayLike<number>): Map<Model | null, number[]>;
+  /**
+   * Searches the properties of every loaded model (`model.properties.find` on each, merged): one
+   * value, a list of thousands of values, a prefix or a numeric range against one key (node names
+   * are under the key `name`). The result's `objectIds` go straight into `select`, `isolate`,
+   * `setColor` or `fitToView`; `hits` tells which input values were not found. Each model's index
+   * is built on its first query.
+   */
+  findObjects(query: PropertyQuery): PropertySearch;
+  /** The property keys of all loaded models, merged by name (counts summed), alphabetically. */
+  propertyKeys(): PropertyKeyInfo[];
 
   // --- queries and effects ---
   /** GPU pick at canvas CSS-pixel coordinates. */

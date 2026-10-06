@@ -104,24 +104,35 @@ export type ResourceResolver = (
 // Context
 // ------------------------------------------------------------------------------------------------
 
+/** Properties of one hierarchy node: plain key -> value, as the file stores them. */
+export type NodeProperties = Record<string, unknown>;
+
 /**
- * Metadata hierarchy (names, parent/child tree) stored columnar: a parent index array, an objectId
- * array and lazily resolved names. No per-node objects are created.
+ * Metadata hierarchy (names, parent/child tree, per-node properties) stored columnar: a parent index
+ * array, an objectId array and lazily resolved names and properties. No per-node objects are
+ * created until a node's properties are asked for.
  */
 export interface HierarchyBuilder {
   /** Number of nodes added so far (node indices are 0..count-1 in insertion order). */
   readonly count: number;
   /**
    * Adds one node. `parent`: an earlier node index, or -1 for a root. `objectId` links the node to
-   * meshes (NaN/omitted when the node has no own object).
+   * meshes (NaN/omitted when the node has no own object). `properties` are the node's own key /
+   * value pairs (e.g. glTF `extras`); they are indexed for `Model.properties.find`.
    */
-  addNode(parent: number, name?: string, objectId?: number): number;
+  addNode(parent: number, name?: string, objectId?: number, properties?: NodeProperties): number;
   /**
    * Bulk add. `parents[i]` is a node index in the same index space (already offset: pass absolute
-   * indices; -1 = root, -2 = detached / not part of the tree). Names are produced lazily by
-   * `name(i)` (i = index within this batch) only when asked for. Returns the first node index.
+   * indices; -1 = root, -2 = detached / not part of the tree). Names and properties are produced
+   * lazily by `name(i)` / `properties(i)` (i = index within this batch) only when asked for, so a
+   * loader can keep its parsed source alive instead of copying. Returns the first node index.
    */
-  addNodes(parents: ArrayLike<number>, objectIds?: ArrayLike<number>, name?: (i: number) => string | undefined): number;
+  addNodes(
+    parents: ArrayLike<number>,
+    objectIds?: ArrayLike<number>,
+    name?: (i: number) => string | undefined,
+    properties?: (i: number) => NodeProperties | undefined,
+  ): number;
 }
 
 /** Lazily computes properties for an objectId of this model (undefined = none). */
@@ -247,6 +258,79 @@ export interface ModelHierarchy {
   objectId(node: number): number;
   /** Node carrying this objectId, or -1. */
   nodeOfObject(objectId: number): number;
+  /**
+   * The node's own properties (a fresh object, undefined when it has none). With `inherited`, the
+   * properties of all ancestors are merged in, nearer nodes winning: what a part "is" when the
+   * file stores the data on the groups above it (a spool's spec on its pipe pieces).
+   */
+  properties(node: number, inherited?: boolean): NodeProperties | undefined;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Property index: distinct, sorted values per key -> matching nodes (see src/metadata)
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * One query against the property index. Exactly one of `equals`, `in`, `startsWith` or a
+ * `min` / `max` range selects the values; `key` names the property (node names are indexed under
+ * the key `name`). Matching is on the trimmed text of the value and ignores case unless
+ * `caseSensitive`. A node matches when one of its *own* properties matches; the objects under it
+ * (its whole subtree) are the result.
+ */
+export interface PropertyQuery {
+  key: string;
+  /** One value. Numbers are matched by their text. */
+  equals?: string | number;
+  /** Many values at once (one sort + merge, not one lookup each): `hits[i]` reports value i. */
+  in?: ArrayLike<string | number>;
+  /** Values starting with this text. */
+  startsWith?: string;
+  /** Numeric range, inclusive; values that do not parse as numbers never match. */
+  min?: number;
+  max?: number;
+  caseSensitive?: boolean;
+}
+
+/** Result of `PropertyIndex.find`: the matching nodes of one model and the objects under them. */
+export interface PropertyMatch {
+  /** objectIds of the matching nodes and everything below them, ascending, no duplicates. */
+  objectIds: Float64Array;
+  /** Matching node indices (the nodes carrying a matching value), ascending. */
+  nodes: Int32Array;
+  /** The distinct stored values that matched, in dictionary order. */
+  values: string[];
+  /** `in` queries: number of matching nodes per input value (0 = not in this model); else null. */
+  hits: Int32Array | null;
+}
+
+export interface PropertyKeyInfo {
+  key: string;
+  /** Nodes carrying the key. */
+  count: number;
+  /** Distinct values. */
+  distinct: number;
+  /** True when every value parses as a number. */
+  numeric: boolean;
+}
+
+/**
+ * Column store over the hierarchy's properties: every key gets a sorted dictionary of its distinct
+ * values and, per value, the sorted list of nodes carrying it, all in typed arrays (VertiPaq-style
+ * dictionary encoding). Built from the hierarchy on first use (`build()` forces it) and dropped on
+ * unload. Node names are indexed under the key `name`.
+ */
+export interface PropertyIndex {
+  /** Builds the index now (otherwise the first query does). Returns the build time in ms. */
+  build(): number;
+  /** True once built. */
+  readonly ready: boolean;
+  find(query: PropertyQuery): PropertyMatch;
+  /** The indexed keys, alphabetically. */
+  keys(): PropertyKeyInfo[];
+  /** Distinct values of a key in dictionary order (case-insensitive sort), [] for unknown keys. */
+  values(key: string): string[];
+  /** objectIds of a node and everything below it, ascending (what a tree click selects). */
+  objectsUnder(node: number): Float64Array;
 }
 
 export interface Model {
@@ -280,6 +364,8 @@ export interface Model {
   objectIds(): Float64Array;
   /** Node name and plugin-provided properties for an objectId of this model. */
   getProperties(objectId: number): Record<string, unknown> | undefined;
+  /** Search over the hierarchy's properties (see `PropertyIndex`). */
+  readonly properties: PropertyIndex;
   /** The exact objectId ranges of this model as [first0, count0, first1, count1, ...] (fresh array). */
   objectIdRuns(): Float64Array;
   /** True when the objectId belongs to this model. */

@@ -21,6 +21,51 @@ const close = (a: ArrayLike<number>, b: ArrayLike<number>, eps = 1e-9) => {
   for (let i = 0; i < a.length; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(eps);
 };
 
+describe('glTF loader: node extras as searchable properties', () => {
+  it('extras on group nodes are indexed; a match selects the subtree', async () => {
+    const b = new GltfBuilder();
+    const pos = b.accessor(TRI, 'VEC3');
+    const mesh = b.mesh([{ attributes: { POSITION: pos } }], 'tri');
+    const p1 = b.node({ name: 'pipe-1', mesh });
+    const p2 = b.node({ name: 'pipe-2', mesh });
+    const p3 = b.node({ name: 'pipe-3', mesh, extras: 'not an object' });
+    const sp1 = b.node({ name: 'SP001', children: [p1, p2], extras: { Spool: 'SP001', Spec: '1W3AX', Weight: '70.4' } });
+    const sp2 = b.node({ name: 'SP002', children: [p3], extras: { Spool: 'SP002', Spec: '2C1', Weight: '5' } });
+    b.node({ name: 'ISO', children: [sp1, sp2], extras: { Isometric: 'ISO-1', Pipeline: 'P' } }, true);
+
+    const v = createMockViewer();
+    const m = await load(v, b.glb());
+    const h = m.hierarchy;
+    expect(h.properties(sp1)).toEqual({ Spool: 'SP001', Spec: '1W3AX', Weight: '70.4' });
+    expect(h.properties(p3)).toBeUndefined();
+    expect(h.properties(p1, true)).toEqual({ Isometric: 'ISO-1', Pipeline: 'P', Spool: 'SP001', Spec: '1W3AX', Weight: '70.4' });
+
+    const idx = m.properties;
+    expect(idx.keys().map((k) => k.key)).toEqual(['Isometric', 'Pipeline', 'Spec', 'Spool', 'Weight', 'name']);
+    const r = idx.find({ key: 'Spool', in: ['sp001', 'SP009'] });
+    expect(Array.from(r.hits!)).toEqual([1, 0]);
+    expect(Array.from(r.objectIds)).toEqual([h.objectId(p1), h.objectId(p2)]);
+    expect(Array.from(idx.find({ key: 'Weight', max: 10 }).objectIds)).toEqual([h.objectId(p3)]);
+    expect(Array.from(idx.find({ key: 'Isometric', equals: 'ISO-1' }).objectIds)).toEqual(Array.from(m.objectIds()).sort((a, c) => a - c));
+    expect(Array.from(idx.find({ key: 'name', startsWith: 'pipe' }).objectIds).length).toBe(3);
+
+    // unload drops the index and the properties
+    m.unload();
+    expect(idx.find({ key: 'Spool', equals: 'SP001' }).objectIds.length).toBe(0);
+    expect(h.properties(sp1)).toBeUndefined();
+  });
+
+  it('keepNames: false keeps no properties either', async () => {
+    const b = new GltfBuilder();
+    const pos = b.accessor(TRI, 'VEC3');
+    const mesh = b.mesh([{ attributes: { POSITION: pos } }]);
+    b.node({ name: 'x', mesh, extras: { a: 1 } }, true);
+    const m = await load(createMockViewer(), b.glb(), { options: { keepNames: false } });
+    expect(m.hierarchy.properties(0)).toBeUndefined();
+    expect(m.properties.keys()).toEqual([]);
+  });
+});
+
 describe('glTF loader: geometry', () => {
   it('non-indexed float positions are passed as zero-copy views; normals kept', async () => {
     const b = new GltfBuilder();
@@ -223,6 +268,8 @@ describe('glTF loader: scene', () => {
     const oid = h.objectId(1);
     expect(m.getProperties(oid)).toEqual({ name: 'Труба B', gltfNode: 1, meshName: 'tri', extras: { tag: 7 } });
     expect(Number.isNaN(h.objectId(2))).toBe(true);
+    expect(h.properties(1)).toEqual({ tag: 7 });
+    expect(h.properties(0)).toBeUndefined();
 
     // group by depth 1: both meshes share the objectId of 'Группа'
     const v2 = createMockViewer();

@@ -13,6 +13,7 @@ function hierarchy(names: string[], parents: number[], objectIds: number[]): Mod
     name: (n) => names[n] || undefined,
     objectId: (n) => objectIds[n],
     nodeOfObject: (id) => objectIds.indexOf(id),
+    properties: () => undefined,
   };
 }
 

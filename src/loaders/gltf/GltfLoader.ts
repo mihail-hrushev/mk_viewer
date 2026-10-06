@@ -313,7 +313,12 @@ async function loadGltf(source: LoaderSource, ctx: LoadContext<GltfLoaderOptions
     for (let k = 0; k < ownerCount; k++) oidCol[owners[k]] = oidBase + k;
     if (offset) for (let i = 0; i < N; i++) if (parent[i] >= 0) parent[i] += offset;
     const keep = opt.keepNames !== false;
-    ctx.hierarchy.addNodes(parent, oidCol, keep ? (i) => nodes[i].name : undefined);
+    ctx.hierarchy.addNodes(
+      parent,
+      oidCol,
+      keep ? (i) => nodes[i].name : undefined,
+      keep ? (i) => nodeProperties(nodes[i].extras) : undefined,
+    );
     if (keep) {
       // lazy properties straight from the parsed nodes (the only JSON part retained)
       const ownerTable = owners.slice(0, ownerCount);
@@ -576,4 +581,9 @@ export function toTriangleList(idx: ArrayLike<number> | undefined, vertexCount: 
     out[o++] = c;
   }
   return o === out.length ? out : out.slice(0, o);
+}
+
+/** glTF `extras` of a node as its properties: only a plain JSON object counts. */
+function nodeProperties(extras: unknown): Record<string, unknown> | undefined {
+  return extras !== null && typeof extras === 'object' && !Array.isArray(extras) ? (extras as Record<string, unknown>) : undefined;
 }

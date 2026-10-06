@@ -37,7 +37,8 @@ All three of typecheck, test and build must pass before a change is done.
 - `src/core` — CPU scene data: FragmentList, GeometryStore, MaterialStore, Batcher, draw-item BVH
 - `src/gl` — WebGL2 wrappers, uber-shader, render targets, post passes, pixel reader
 - `src/render` — progressive renderer, budget controller, GPU mirroring, scene origin
-- `src/loaders` — plugin contract, registry, glTF/GLB and OBJ plugins
+- `src/loaders` — plugin contract, registry, glTF/GLB and OBJ plugins, columnar hierarchy store
+- `src/metadata` — property index (dictionary columns + postings over the hierarchy), sorted-set helpers
 - `src/Viewer.ts`, `src/index.ts` — public class and library entry
 
 ## Verifying rendering changes

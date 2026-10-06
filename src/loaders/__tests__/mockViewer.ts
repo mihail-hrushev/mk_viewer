@@ -153,6 +153,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     registerLoader: () => () => {},
     getModelOf: () => undefined,
     groupByModel: (ids) => new Map([[null, Array.from(ids)]]),
+    findObjects: (q) => ({ objectIds: new Float64Array(0), hits: q.in ? new Int32Array(q.in.length) : null, matches: [] }),
+    propertyKeys: () => [],
     createMaterial(params?: MaterialParams) {
       materials.push({ ...(params ?? {}) });
       return materials.length - 1;
