@@ -347,7 +347,8 @@ callbacks and `ui()` hook, so one plugin cannot break another. Errors in `instal
 `colorPlugin` (`src/plugins/color/colorPlugin.ts`, exported from the package) is deliberately small:
 it adds **Red** and **Reset colour** to the context menu. The user right-clicks an object (it becomes
 the selection), chooses **Red**, and the object turns red; **Reset colour** gives it its material
-colour back. Here is the whole plugin:
+colour back, or, when no coloured object is selected any more, undoes all of the plugin's colouring.
+Here is the whole plugin:
 
 ```ts
 import type { Color, ContextMenuContext, PluginInstance, ViewerPlugin } from 'mk-viewer';
@@ -363,7 +364,8 @@ export interface ColorPluginOptions {
 export interface ColorPlugin extends PluginInstance {
   readonly color: Color;
   apply(objectIds?: ArrayLike<number>): void; // default: the selection
-  reset(objectIds?: ArrayLike<number>): void;
+  reset(objectIds?: ArrayLike<number>): void; // default: the selection if coloured, else resetAll()
+  resetAll(): void;                           // every object the plugin coloured
 }
 
 export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<ColorPlugin> {
@@ -372,14 +374,39 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
   return {
     name: options.name ?? 'color',
     install({ viewer, addContextMenuItem }) {
-      const apply = (ids: ArrayLike<number> = viewer.getSelection()): void => {
-        if (ids.length > 0) viewer.setColor(ids, color);
+      const colored = new Set<number>(); // objects coloured by the plugin, so "Reset colour" can find them again
+      const isColored = (id: number): boolean => viewer.getColor(id) !== null;
+      const anyColored = (ids: Iterable<number>): boolean => {
+        for (const id of ids) if (isColored(id)) return true;
+        return false;
       };
-      const reset = (ids: ArrayLike<number> = viewer.getSelection()): void => {
+
+      const apply = (ids: ArrayLike<number> = viewer.getSelection()): void => {
+        if (ids.length === 0) return;
+        viewer.setColor(ids, color);
+        for (let i = 0; i < ids.length; i++) colored.add(ids[i]);
+      };
+      const resetAll = (): void => {
+        const ids = Array.from(colored).filter(isColored); // an id may have been reset or unloaded since
+        colored.clear();
         if (ids.length > 0) viewer.setColor(ids, null);
       };
+      const reset = (ids?: ArrayLike<number>): void => {
+        if (ids === undefined) {
+          const selection = viewer.getSelection();
+          ids = selection;
+          if (!anyColored(selection)) {
+            // nothing coloured is selected (e.g. a click elsewhere deselected it): undo the colouring
+            resetAll();
+            return;
+          }
+        }
+        if (ids.length === 0) return;
+        viewer.setColor(ids, null);
+        for (let i = 0; i < ids.length; i++) colored.delete(ids[i]);
+      };
       const hasSelection = (c: ContextMenuContext): boolean => c.selection.length > 0;
-      const anyColored = (c: ContextMenuContext): boolean => c.selection.some((id) => viewer.getColor(id) !== null);
+      const canReset = (c: ContextMenuContext): boolean => anyColored(c.selection) || anyColored(colored);
       const order = options.order ?? 0;
 
       // owned by the plugin: removed again by viewer.removePlugin() and viewer.dispose()
@@ -391,7 +418,13 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
       });
       const resetLabel = options.resetLabel === undefined ? 'Reset colour' : options.resetLabel;
       if (resetLabel !== null) {
-        addContextMenuItem({ label: resetLabel, order, enabled: anyColored, onClick: (c) => reset(c.selection) });
+        addContextMenuItem({
+          label: resetLabel,
+          title: 'Restore the material colour of the selected objects, or of all coloured objects when none is selected',
+          order,
+          enabled: canReset,
+          onClick: (c) => (anyColored(c.selection) ? reset(c.selection) : resetAll()),
+        });
       }
 
       return {
@@ -400,6 +433,7 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
         },
         apply,
         reset,
+        resetAll,
       };
     },
   };
@@ -415,13 +449,16 @@ Step by step:
    tests.
 3. **Menu entries.** Both entries act on `c.selection`, which is what the user right-clicked (the
    viewer selected it before building the menu) or the existing selection when they right-clicked
-   inside it. **Red** is disabled with nothing selected. **Reset colour** is enabled only when a
-   selected object has an override (`viewer.getColor`); it stops at the first coloured one. Both
-   live in group 0, after the built-in entries.
+   inside it. **Red** is disabled with nothing selected. **Reset colour** acts on the selection when
+   a selected object has an override (`viewer.getColor`; the check stops at the first coloured one).
+   Otherwise, typically because a click elsewhere deselected the coloured object, it removes the
+   colour of every object the plugin coloured: the plugin remembers their ids in a `Set`, so the
+   entry is never dead while its colouring is still visible. Both live in group 0, after the
+   built-in entries.
 4. **The scene change** is one `viewer.setColor` call. Nothing else is needed for merged or
    instanced meshes, transparent materials, several loaded models or the progressive renderer.
-5. **Instance.** The returned object is the plugin's public API: `apply(ids?)`, `reset(ids?)` and
-   `color`, usable without any menu:
+5. **Instance.** The returned object is the plugin's public API: `apply(ids?)`, `reset(ids?)`,
+   `resetAll()` and `color`, usable without any menu:
 
    ```ts
    const paint = viewer.getPlugin<ColorPlugin>('color')!;
@@ -430,7 +467,8 @@ Step by step:
 
 6. **Cleanup.** There is nothing to dispose: no event subscriptions, no tool, no DOM, and the menu
    entries are owned by the context. The colours themselves are user edits and stay after
-   `removePlugin('color')`; `viewer.setColor(ids, null)` removes them.
+   `removePlugin('color')` (call `resetAll()` first to remove them); `viewer.setColor(ids, null)`
+   removes them too.
 
 Registering it, as [`examples/models.ts`](../examples/models.ts) does (try it on
 `/examples/models.html`):

@@ -476,9 +476,10 @@ points (the magnet is larger). Headless: `measure.add(a, b)`, `measure.measureme
 are hidden or unloaded and do not follow `model.setTransform`.
 
 **Colour** (`colorPlugin`): right-click an object and choose **Red** to colour it (and everything
-else selected); **Reset colour** restores the material colour. Headless: `apply(ids?)`,
-`reset(ids?)`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`, `name`. The
-colours are ordinary `setColor` overrides and stay when the plugin is removed.
+else selected); **Reset colour** restores the material colour of the selected objects, or of every
+object the plugin coloured when no coloured object is selected. Headless: `apply(ids?)`,
+`reset(ids?)`, `resetAll()`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`,
+`name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 ## Controls
 

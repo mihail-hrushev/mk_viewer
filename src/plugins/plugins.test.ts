@@ -439,6 +439,41 @@ describe('colour plugin', () => {
     expect(v.getColor(2)).toBeNull();
     expect(p.color).toEqual([1, 0, 0]);
 
+    // the coloured object is no longer selected (a click elsewhere): "Reset colour" still works
+    // and removes every colour the plugin applied
+    m = entries(hit(1));
+    m.Red.run();
+    p.apply([2]);
+    v.select([]);
+    m = entries(null);
+    expect(m.Red.enabled).toBe(false);
+    expect(m['Reset colour'].enabled).toBe(true);
+    m['Reset colour'].run();
+    expect(v.getColor(1)).toBeNull();
+    expect(v.getColor(2)).toBeNull();
+    m = entries(null);
+    expect(m['Reset colour'].enabled).toBe(false);
+    // ... also when the selection is an uncoloured object; a coloured selection resets only itself
+    p.apply([1]);
+    m = entries(hit(2));
+    expect(m['Reset colour'].enabled).toBe(true);
+    m['Reset colour'].run();
+    expect(v.getColor(1)).toBeNull();
+    p.apply([1, 2]);
+    v.select([2]);
+    p.reset(); // default: the selection, as it is coloured
+    expect(v.getColor(1)).toEqual([1, 0, 0, 1]);
+    expect(v.getColor(2)).toBeNull();
+    v.select([]);
+    p.reset(); // default with nothing coloured selected: everything the plugin coloured
+    expect(v.getColor(1)).toBeNull();
+    // overrides set by the application are not the plugin's to reset
+    v.setColor([2], [0, 1, 0]);
+    expect(entries(null)['Reset colour'].enabled).toBe(false);
+    p.resetAll();
+    expect(v.getColor(2)).toEqual([0, 1, 0, 1]);
+    v.setColor([2], null);
+
     v.removePlugin('color');
     expect(Object.keys(entries(null))).toEqual([]);
   });
