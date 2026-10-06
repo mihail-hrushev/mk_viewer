@@ -511,6 +511,14 @@ export interface ViewerApi {
    * decimals), or null when it has none or does not exist. Reads the object's first mesh.
    */
   getColor(objectId: number): [number, number, number, number] | null;
+  /**
+   * Every object that currently has a colour override, whoever set it, in the order they were
+   * first coloured (a new array). Lets a plugin or application reset or restore colours it did not
+   * set itself before applying its own.
+   */
+  getColoredObjects(): number[];
+  /** Removes every colour override: `setColor(getColoredObjects(), null)`. */
+  clearColors(): void;
   select(objectIds: ArrayLike<number>): void;
   getSelection(): number[];
   showAll(): void;

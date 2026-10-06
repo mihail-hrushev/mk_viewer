@@ -41,6 +41,12 @@ export class Scene {
 
   private selection = new Float64Array(16);
   private selectionCount = 0;
+  /**
+   * Objects given a colour override by setColor, in first-coloured order. May hold ids whose meshes
+   * were removed since; getColoredObjects prunes them.
+   */
+  private readonly colored = new Set<number>();
+  private readonly colorTmp = new Float64Array(4);
   private highlighted = NaN;
   private mark = new Uint8Array(0);
 
@@ -171,6 +177,7 @@ export class Scene {
     this.triangleCount = 0;
     this.selectionCount = 0;
     this.highlighted = NaN;
+    this.colored.clear();
   }
 
   setTransform(id: number, transform: Mat4): void {
@@ -278,10 +285,28 @@ export class Scene {
       a = color.length > 3 ? (color as number[])[3] : 1;
     }
     const fr = this.fragments;
+    const colored = this.colored;
     const one = (id: number) => {
-      for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) fr.setColor(f, r, g, b, a);
+      let f = fr.firstOfObject(id);
+      if (f < 0) return; // no mesh: nothing to colour, and not remembered
+      if (a > 0) colored.add(id); // strength 0 is no override, as getColor reports it
+      else colored.delete(id);
+      for (; f >= 0; f = fr.nextOfObject(f, id)) fr.setColor(f, r, g, b, a);
     };
     forEachObject(objectIds, one);
+  }
+
+  /**
+   * The objects that have a colour override, in the order they were first coloured: exactly those
+   * for which getColor is true. Objects whose meshes were removed since are dropped.
+   */
+  getColoredObjects(): number[] {
+    const out: number[] = [];
+    for (const id of this.colored) {
+      if (this.getColor(id, this.colorTmp)) out.push(id);
+      else this.colored.delete(id); // deleting during iteration of a Set is safe
+    }
+    return out;
   }
 
   /**

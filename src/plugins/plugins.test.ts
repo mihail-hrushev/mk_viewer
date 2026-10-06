@@ -404,6 +404,59 @@ describe('colour overrides', () => {
     expect(v.getColor(plain)).toBeNull();
     expect(v.getColor(12345)).toBeNull();
   });
+
+  it('getColoredObjects lists every override in first-coloured order; clearColors removes them', () => {
+    hv = createHeadlessViewer();
+    const v = hv.viewer;
+    const geo = v.primitives.box();
+    const mat = v.createMaterial();
+    const mesh = (objectId: number) => v.addMesh({ geometry: geo, material: mat, objectId });
+    mesh(1);
+    mesh(2);
+    mesh(3);
+    const m4 = mesh(4);
+    expect(v.getColoredObjects()).toEqual([]);
+    v.setColor([3, 1], [1, 0, 0]);
+    v.setColor(2, [0, 1, 0, 0.5]);
+    v.setColor(3, [0, 0, 1]); // re-colouring keeps the first-coloured position
+    expect(v.getColoredObjects()).toEqual([3, 1, 2]);
+    v.setColor(1, null); // null forgets the id
+    expect(v.getColoredObjects()).toEqual([3, 2]);
+    v.setColor(1, [1, 1, 0]);
+    expect(v.getColoredObjects()).toEqual([3, 2, 1]);
+    v.setColor(2, [0, 1, 0, 0]); // strength 0 is no override
+    expect(v.getColor(2)).toBeNull();
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+    v.setColor(999, [1, 0, 0]); // an id without meshes is not remembered
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+    // the result is a new array
+    v.getColoredObjects().length = 0;
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+
+    // removed meshes drop out, also when a mesh with the same objectId is added again
+    v.setColor(4, [1, 0, 0]);
+    expect(v.getColoredObjects()).toEqual([3, 1, 4]);
+    v.remove(m4);
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+    v.setColor(4, [1, 0, 0]);
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+    mesh(4);
+    expect(v.getColor(4)).toBeNull();
+    expect(v.getColoredObjects()).toEqual([3, 1]);
+    for (const id of v.getColoredObjects()) expect(v.getColor(id)).not.toBeNull();
+
+    v.clearColors();
+    expect(v.getColoredObjects()).toEqual([]);
+    expect(v.getColor(1)).toBeNull();
+    expect(v.getColor(3)).toBeNull();
+    v.clearColors(); // nothing to do
+
+    v.setColor([1, 2], [1, 0, 0]);
+    v.clear();
+    expect(v.getColoredObjects()).toEqual([]);
+    mesh(1);
+    expect(v.getColoredObjects()).toEqual([]);
+  });
 });
 
 describe('colour plugin', () => {
@@ -440,7 +493,7 @@ describe('colour plugin', () => {
     expect(p.color).toEqual([1, 0, 0]);
 
     // the coloured object is no longer selected (a click elsewhere): "Reset colour" still works
-    // and removes every colour the plugin applied
+    // and removes every colour override in the viewer
     m = entries(hit(1));
     m.Red.run();
     p.apply([2]);
@@ -465,12 +518,22 @@ describe('colour plugin', () => {
     expect(v.getColor(1)).toEqual([1, 0, 0, 1]);
     expect(v.getColor(2)).toBeNull();
     v.select([]);
-    p.reset(); // default with nothing coloured selected: everything the plugin coloured
+    p.reset(); // default with nothing coloured selected: every override
     expect(v.getColor(1)).toBeNull();
-    // overrides set by the application are not the plugin's to reset
+    // overrides set by the application (or another plugin) are reset too
     v.setColor([2], [0, 1, 0]);
+    m = entries(null);
+    expect(m['Reset colour'].enabled).toBe(true);
+    m['Reset colour'].run();
+    expect(v.getColor(2)).toBeNull();
+    expect(v.getColoredObjects()).toEqual([]);
     expect(entries(null)['Reset colour'].enabled).toBe(false);
-    p.resetAll();
+    // the selected object is coloured: only the selection is reset
+    p.apply([1]);
+    v.setColor([2], [0, 1, 0]);
+    m = entries(hit(1));
+    m['Reset colour'].run();
+    expect(v.getColor(1)).toBeNull();
     expect(v.getColor(2)).toEqual([0, 1, 0, 1]);
     v.setColor([2], null);
 

@@ -44,7 +44,9 @@ Dirty ranges are tracked so the GPU data texture is updated with minimal `texSub
 Everything per-object that can change at runtime (transform, visibility, selection, ghosting,
 colour override, material) lives in the fragment record and is read by the vertex shader from the
 fragment data texture. Changing any of it is a few floats written + a small texture upload; vertex
-buffers are never touched.
+buffers are never touched. The scene also keeps a `Set` of the objectIds that have a colour override
+(maintained by `setColor`, pruned of objects without meshes when read) so `getColoredObjects()` and
+`clearColors()` need no scan of the fragment list.
 
 **Geometry** is quantized on creation: positions to u16 inside the mesh's local AABB, normals to
 2-byte octahedral. Identical geometry is deduplicated by content hash. The dequantization

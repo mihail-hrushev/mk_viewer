@@ -606,6 +606,15 @@ export class Viewer implements ViewerApi {
     this.renderer.invalidateImage();
   }
 
+  getColoredObjects(): number[] {
+    return this.scene.getColoredObjects();
+  }
+
+  clearColors(): void {
+    const ids = this.scene.getColoredObjects();
+    if (ids.length > 0) this.setColor(ids, null);
+  }
+
   getColor(objectId: number): [number, number, number, number] | null {
     const c = this.colorTmp;
     if (!this.scene.getColor(objectId, c)) return null;

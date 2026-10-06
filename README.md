@@ -219,7 +219,8 @@ viewer.setColor(sel(), palette[paint++ % palette.length]);
 
 `setColor(ids, null)` restores the material colour, and a 4th component blends the override
 (`[1, 1, 1, 0.7]` is 70 % white over the material). `getColor(id)` returns an object's override, or
-null when it has none. `showAll()` ends isolation and shows hidden
+null when it has none. `getColoredObjects()` lists every object with an override, whoever set it,
+and `clearColors()` removes them all. `showAll()` ends isolation and shows hidden
 objects. Ids for your own data should not collide with loaded models: `allocObjectIds(n)` reserves a
 range no model will receive (model ids start at 2^30).
 
@@ -476,9 +477,9 @@ points (the magnet is larger). Headless: `measure.add(a, b)`, `measure.measureme
 are hidden or unloaded and do not follow `model.setTransform`.
 
 **Colour** (`colorPlugin`): right-click an object and choose **Red** to colour it (and everything
-else selected); **Reset colour** restores the material colour of the selected objects, or of every
-object the plugin coloured when no coloured object is selected. Headless: `apply(ids?)`,
-`reset(ids?)`, `resetAll()`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`,
+else selected); **Reset colour** restores the material colour of the selected objects, or removes
+every colour override (`viewer.clearColors()`, also those set by the application) when no coloured
+object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`,
 `name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 ## Controls

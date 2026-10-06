@@ -217,6 +217,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     isolate() {},
     setColor() {},
     getColor: () => null,
+    getColoredObjects: () => [],
+    clearColors() {},
     select() {},
     getSelection: () => [],
     showAll() {
