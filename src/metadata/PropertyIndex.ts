@@ -33,8 +33,10 @@ interface Column {
   /** Value ids sorted by number (only numeric values); built on the first range query. */
   numOrder: Int32Array | null;
   postStart: Int32Array;
-  /** Preorder positions. */
+  /** Preorder positions, sorted and unique within each value's run. */
   postNode: Int32Array;
+  /** Distinct nodes carrying the key. */
+  nodes: number;
   numeric: boolean;
 }
 
@@ -66,7 +68,7 @@ export class PropertyIndexImpl implements PropertyIndex {
   }
 
   get ready(): boolean {
-    return this.built;
+    return this.built && this.store !== null;
   }
 
   /** Drops the index and its source (unload). Later queries return nothing. */
@@ -93,7 +95,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     this.build();
     const out: PropertyKeyInfo[] = [];
     for (const c of this.columns.values()) {
-      out.push({ key: c.key, count: c.postStart[c.values.length], distinct: c.values.length, numeric: c.numeric });
+      out.push({ key: c.key, count: c.nodes, distinct: c.values.length, numeric: c.numeric });
     }
     return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
@@ -109,7 +111,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     if (!(node >= 0 && node < this.pos.length)) return new Float64Array(0);
     const p = this.pos[node];
     const out = this.preObj.slice(this.objStart[p], this.objStart[this.end[node]]);
-    return sortIfNeeded(out);
+    return uniqueSorted(sortIfNeeded(out));
   }
 
   find(q: PropertyQuery): PropertyMatch {
@@ -138,7 +140,9 @@ export class PropertyIndexImpl implements PropertyIndex {
       }
     } else if (q.min !== undefined || q.max !== undefined) {
       const ord = (col.numOrder ??= numericOrder(col));
-      const lo = q.min ?? -Infinity, hi = q.max ?? Infinity;
+      // a NaN bound (e.g. Number('') from an empty field) counts as absent
+      const lo = q.min === undefined || q.min !== q.min ? -Infinity : q.min;
+      const hi = q.max === undefined || q.max !== q.max ? Infinity : q.max;
       let a = 0, b = ord.length;
       // first value >= lo
       {
@@ -179,7 +183,8 @@ export class PropertyIndexImpl implements PropertyIndex {
       k += col.postStart[v + 1] - col.postStart[v];
     }
     positions.sort();
-    return { objectIds: this.expand(positions), nodes: this.nodesOf(positions), values, hits };
+    const unique = uniqueSortedI32(positions); // one node may carry several matching values
+    return { objectIds: this.expand(unique), nodes: this.nodesOf(unique), values, hits };
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -202,13 +207,16 @@ export class PropertyIndexImpl implements PropertyIndex {
       const i = idx[s];
       const low = lows[i];
       while (j < V && lowers[j] < low) j++;
-      let h = 0;
+      let h = 0, first = -1, matched = 0;
       for (let t = j; t < V && lowers[t] === low; t++) {
         if (cs && col.values[t] !== texts[i]) continue;
         mask[t] = 1;
         h += col.postStart[t + 1] - col.postStart[t];
+        if (first < 0) first = t;
+        matched++;
       }
-      hits[i] = h;
+      // several dictionary entries (case variants) may share nodes: count distinct nodes then
+      hits[i] = matched > 1 ? distinctNodes(col, first, low) : h;
     }
   }
 
@@ -234,7 +242,7 @@ export class PropertyIndexImpl implements PropertyIndex {
       k += objStart[e] - objStart[p];
       cover = e;
     }
-    return sortIfNeeded(out);
+    return uniqueSorted(sortIfNeeded(out));
   }
 
   private nodesOf(positions: Int32Array): Int32Array {
@@ -279,7 +287,18 @@ export class PropertyIndexImpl implements PropertyIndex {
     // roots in index order, then detached nodes (-2) as their own roots, then anything unreachable
     for (let i = 0; i < n; i++) if (parents[i] === -1) visit(i);
     for (let i = 0; i < n; i++) if (parents[i] === -2) visit(i);
-    for (let i = 0; i < n; i++) if (pos[i] < 0) visit(i);
+    for (let i = 0; i < n; i++) {
+      if (pos[i] >= 0) continue;
+      // malformed (cycle): climb the unvisited parent chain first so the whole component hangs
+      // together, then visit from there; the step guard ends the climb inside a cycle
+      let top = i;
+      for (let steps = 0; steps < n; steps++) {
+        const p = parents[top];
+        if (p < 0 || pos[p] >= 0) break;
+        top = p;
+      }
+      visit(top);
+    }
     // subtree sizes: positions descending so every child is summed before its parent
     const size = new Int32Array(n).fill(1);
     for (let p = n - 1; p >= 0; p--) {
@@ -336,7 +355,7 @@ export class PropertyIndexImpl implements PropertyIndex {
       const props = h.ownProperties(node);
       if (props) flatten(props, '', 0, p, add);
     }
-    for (const b of builds.values()) this.columns.set(b.key, finishColumn(b));
+    for (const b of builds.values()) this.columns.set(b.key, finishColumn(b, n));
   }
 }
 
@@ -367,7 +386,7 @@ function flatten(
   }
 }
 
-function finishColumn(b: ColumnBuild): Column {
+function finishColumn(b: ColumnBuild, nodeCount: number): Column {
   const D = b.values.length;
   const lowersRaw = new Array<string>(D);
   for (let i = 0; i < D; i++) lowersRaw[i] = b.values[i].toLowerCase();
@@ -398,10 +417,45 @@ function finishColumn(b: ColumnBuild): Column {
   const postStart = new Int32Array(D + 1);
   for (let i = 0; i < O; i++) postStart[rank[b.occVal[i]] + 1]++;
   for (let i = 0; i < D; i++) postStart[i + 1] += postStart[i];
-  const postNode = new Int32Array(O);
+  let postNode = new Int32Array(O);
   const fill = postStart.slice(0, D);
   for (let i = 0; i < O; i++) postNode[fill[rank[b.occVal[i]]]++] = b.occPos[i];
-  return { key: b.key, values, lowers, nums, numOrder: null, postStart, postNode, numeric };
+  // the same (value, node) pair may occur twice (an array with a repeated element): compact runs
+  let w = 0;
+  for (let v = 0; v < D; v++) {
+    const s = postStart[v], e = postStart[v + 1];
+    postStart[v] = w;
+    for (let i = s; i < e; i++) if (i === s || postNode[i] !== postNode[i - 1]) postNode[w++] = postNode[i];
+  }
+  postStart[D] = w;
+  if (w < O) postNode = postNode.slice(0, w);
+  // distinct nodes carrying the key
+  const seen = new Uint8Array(nodeCount);
+  let nodes = 0;
+  for (let i = 0; i < w; i++) {
+    const p = postNode[i];
+    if (!seen[p]) {
+      seen[p] = 1;
+      nodes++;
+    }
+  }
+  return { key: b.key, values, lowers, nums, numOrder: null, postStart, postNode, nodes, numeric };
+}
+
+/** Distinct nodes over the dictionary entries from `first` whose lower-case text is `low`. */
+function distinctNodes(col: Column, first: number, low: string): number {
+  let total = 0;
+  for (let t = first; t < col.lowers.length && col.lowers[t] === low; t++) total += col.postStart[t + 1] - col.postStart[t];
+  const tmp = new Int32Array(total);
+  let k = 0;
+  for (let t = first; t < col.lowers.length && col.lowers[t] === low; t++) {
+    tmp.set(col.postNode.subarray(col.postStart[t], col.postStart[t + 1]), k);
+    k += col.postStart[t + 1] - col.postStart[t];
+  }
+  tmp.sort();
+  let n = 0;
+  for (let i = 0; i < tmp.length; i++) if (i === 0 || tmp[i] !== tmp[i - 1]) n++;
+  return n;
 }
 
 function numericOrder(col: Column): Int32Array {
@@ -444,6 +498,19 @@ function upperBound(a: string[], x: string): number {
 function sortIfNeeded(a: Float64Array): Float64Array {
   for (let i = 1; i < a.length; i++) if (a[i] < a[i - 1]) return a.sort();
   return a;
+}
+
+/** Drops repeated neighbours of a sorted array (returns the input when it has none). */
+function uniqueSorted(a: Float64Array): Float64Array {
+  let w = 0;
+  for (let i = 0; i < a.length; i++) if (i === 0 || a[i] !== a[i - 1]) a[w++] = a[i];
+  return w === a.length ? a : a.slice(0, w);
+}
+
+function uniqueSortedI32(a: Int32Array): Int32Array {
+  let w = 0;
+  for (let i = 0; i < a.length; i++) if (i === 0 || a[i] !== a[i - 1]) a[w++] = a[i];
+  return w === a.length ? a : a.slice(0, w);
 }
 
 function sortIfNeededI32(a: Int32Array): Int32Array {

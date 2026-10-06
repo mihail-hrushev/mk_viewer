@@ -52,12 +52,30 @@ Download progress is reported for you.
 | --- | --- |
 | `createGeometry / createMaterial / addMesh / addMeshes` | tracked versions of the `ViewerApi` calls: the model owns what they create |
 | `allocObjectIds(n)` | scene-unique objectIds (meshes without an objectId get a fresh one automatically) |
-| `hierarchy.addNode(parent, name?, objectId?)`, `hierarchy.addNodes(parents, objectIds?, nameFn?)` | metadata tree stored in columns; names can be resolved lazily |
+| `hierarchy.addNode(parent, name?, objectId?, properties?)`, `hierarchy.addNodes(parents, objectIds?, nameFn?, propertiesFn?)` | metadata tree stored in columns; names and properties can be resolved lazily |
 | `setProperties(objectId, props)`, `setPropertyProvider(fn)` | sparse explicit properties, or lazy lookup |
 | `shouldYield() / yield() / yieldIfNeeded()` | cooperative time slicing (default 8 ms per slice) |
 | `progress(f, stage)`, `warn(msg)`, `signal`, `throwIfAborted()` | reporting and cancellation |
 | `options` | your plugin's typed options (`loadModel(..., { options })`) |
 | `rootTransform` | the global transform + up conversion the context applies (read-only) |
+
+**Node properties.** Give hierarchy nodes their properties as you add them: a plain object of key /
+value pairs as the file stores them, the 4th argument of `addNode`, or for `addNodes` a callback
+`propertiesFn(i)` (`i` = index within the batch) that is only called when the properties are
+needed, so you can answer from your parsed data instead of copying it. Put the properties on the
+node the file puts them on: in most engineering formats that is a *group* node (a system, an
+isometric, a spool) with no objectId of its own, and the mesh leaves below it stay bare. Users read
+them with `model.hierarchy.properties(node, inherited)`, which merges in the ancestors on demand,
+so never copy group data down to the leaves. The properties are indexed automatically; you do
+nothing for `model.properties.find` and `viewer.findObjects` to search them. Node names are
+searchable too, under the key `name`. Nested objects are indexed as dotted keys and arrays as
+repeated values, but flat string / number values are what users search best. `setProperties` /
+`setPropertyProvider` answer `model.getProperties(objectId)` but are not indexed.
+
+```ts
+const spool = ctx.hierarchy.addNode(iso, 'S-0042', NaN, { Spool: 'S-0042', Weight: 182.5 });
+ctx.hierarchy.addNodes(parents, objectIds, (i) => parsed[i].name, (i) => parsed[i].attributes);
+```
 
 ## Minimal skeleton
 
@@ -78,7 +96,7 @@ export const xyzLoader: LoaderPlugin<{ scale: number }> = {
     for (let i = 0; i < parts.length; i++) {
       const geometry = ctx.createGeometry({ positions: parts[i].positions, indices: parts[i].indices });
       ctx.addMesh({ geometry, material, transform: parts[i].matrix, objectId: firstId + i });
-      ctx.hierarchy.addNode(root, parts[i].name, firstId + i);
+      ctx.hierarchy.addNode(root, parts[i].name, firstId + i, parts[i].attributes); // searchable properties
       if (ctx.shouldYield()) { ctx.progress(i / parts.length); await ctx.yield(); }
     }
   },
@@ -104,8 +122,8 @@ to load large files: zero-copy views, instancing, and columnar metadata.
 - **Use `allocObjectIds`** for picking/selection ids. Choose the granularity that matters to users
   (e.g. one id per building element, not per triangle strip), and link ids to hierarchy nodes so
   `model.getProperties(id)` and the tree work.
-- **Store metadata compactly.** Use `hierarchy.addNodes` with a parent array and a lazy name callback
-  over data you already have. Do not create one JS object per node.
+- **Store metadata compactly.** Use `hierarchy.addNodes` with a parent array and lazy name and
+  properties callbacks over data you already have. Do not create one JS object per node.
 - **Pass typed-array views** to `createGeometry` instead of copies. The viewer copies and quantizes
   the data at once, so views on the file buffer are safe and avoid doubling memory.
 - **Declare `up`** and let the user's `LoadOptions.up/transform` do the rest.

@@ -578,7 +578,7 @@ export interface ViewerApi {
    * is built on its first query.
    */
   findObjects(query: PropertyQuery): PropertySearch;
-  /** The property keys of all loaded models, merged by name (counts summed), alphabetically. */
+  /** The property keys of all loaded models, merged by name (`count` and `distinct` summed), alphabetically. */
   propertyKeys(): PropertyKeyInfo[];
 
   // --- queries and effects ---

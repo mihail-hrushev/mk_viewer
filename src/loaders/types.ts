@@ -271,21 +271,22 @@ export interface ModelHierarchy {
 // ------------------------------------------------------------------------------------------------
 
 /**
- * One query against the property index. Exactly one of `equals`, `in`, `startsWith` or a
- * `min` / `max` range selects the values; `key` names the property (node names are indexed under
- * the key `name`). Matching is on the trimmed text of the value and ignores case unless
- * `caseSensitive`. A node matches when one of its *own* properties matches; the objects under it
- * (its whole subtree) are the result.
+ * One query against the property index. One of `equals`, `in`, `startsWith` or a `min` / `max`
+ * range selects the values (when several are given, `in` wins over `equals` over `startsWith` over
+ * the range; a query with only `key` matches nothing); `key` names the property (node names are
+ * indexed under the key `name`). Matching is on the trimmed text of the value and ignores case
+ * unless `caseSensitive`. A node matches when one of its *own* properties matches; the objects under
+ * it (its whole subtree) are the result.
  */
 export interface PropertyQuery {
   key: string;
   /** One value. Numbers are matched by their text. */
   equals?: string | number;
   /** Many values at once (one sort + merge, not one lookup each): `hits[i]` reports value i. */
-  in?: ArrayLike<string | number>;
+  in?: readonly (string | number)[] | Float64Array | Float32Array | Int32Array | Uint32Array;
   /** Values starting with this text. */
   startsWith?: string;
-  /** Numeric range, inclusive; values that do not parse as numbers never match. */
+  /** Numeric range, inclusive; values that do not parse as numbers never match. A NaN bound counts as absent. */
   min?: number;
   max?: number;
   caseSensitive?: boolean;
@@ -295,7 +296,7 @@ export interface PropertyQuery {
 export interface PropertyMatch {
   /** objectIds of the matching nodes and everything below them, ascending, no duplicates. */
   objectIds: Float64Array;
-  /** Matching node indices (the nodes carrying a matching value), ascending. */
+  /** Matching node indices (the nodes carrying a matching value), ascending, no duplicates. */
   nodes: Int32Array;
   /** The distinct stored values that matched, in dictionary order. */
   values: string[];
@@ -307,7 +308,7 @@ export interface PropertyKeyInfo {
   key: string;
   /** Nodes carrying the key. */
   count: number;
-  /** Distinct values. */
+  /** Distinct values (of this model; `viewer.propertyKeys` sums it over the models). */
   distinct: number;
   /** True when every value parses as a number. */
   numeric: boolean;
@@ -316,8 +317,10 @@ export interface PropertyKeyInfo {
 /**
  * Column store over the hierarchy's properties: every key gets a sorted dictionary of its distinct
  * values and, per value, the sorted list of nodes carrying it, all in typed arrays (VertiPaq-style
- * dictionary encoding). Built from the hierarchy on first use (`build()` forces it) and dropped on
- * unload. Node names are indexed under the key `name`.
+ * dictionary encoding). Built from the hierarchy on first use (`build()` forces it) as a snapshot
+ * (a model's hierarchy does not change after the load) and dropped on unload. Node names are
+ * indexed under the key `name`; nested objects become dotted keys, arrays of primitives repeated
+ * values (arrays of objects are skipped).
  */
 export interface PropertyIndex {
   /** Builds the index now (otherwise the first query does). Returns the build time in ms. */

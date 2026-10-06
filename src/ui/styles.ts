@@ -56,6 +56,20 @@ const CSS = `
 .mkv-menu-item:disabled{color:#80868b;cursor:default}
 .mkv-menu-sep{height:1px;margin:4px 2px;background:#3c4043}
 .mkv-empty{padding:12px;color:#9aa0a6}
+.mkv-panel [hidden]{display:none}
+.mkv-propbody>*{flex-shrink:0}
+.mkv-subhead{font-weight:600;padding-top:8px;border-top:1px solid #3c4043}
+.mkv-field{font:inherit;color:inherit;min-width:0;min-height:32px;padding:4px 8px;border:1px solid #5f6368;border-radius:6px;background:#202124;outline:none}
+.mkv-field:focus{border-color:#8ab4f8}
+textarea.mkv-field{width:100%;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.mkv-panel input[type=color]{width:40px;height:32px;padding:2px;border:1px solid #5f6368;border-radius:6px;background:#202124;cursor:pointer}
+.mkv-props{width:100%;border-collapse:collapse;table-layout:fixed}
+.mkv-props td{padding:3px 6px 3px 0;vertical-align:top;overflow-wrap:anywhere;border-top:1px solid #2d3035}
+.mkv-props td:first-child{width:38%;color:#9aa0a6}
+.mkv-props tr.mkv-props-meta td:last-child{font-weight:600}
+.mkv-missing summary{cursor:pointer;color:#fdd663}
+.mkv-missing pre{margin:4px 0;max-height:160px;overflow:auto;padding:4px 8px;border:1px solid #3c4043;border-radius:6px;background:#202124;
+  font:12px/1.4 ui-monospace,Consolas,monospace;user-select:text;-webkit-user-select:text}
 `;
 
 export function ensureStyles(doc: Document): void {

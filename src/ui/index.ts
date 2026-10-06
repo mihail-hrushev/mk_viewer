@@ -2,6 +2,7 @@ export { createViewerUi } from './ViewerUi';
 export type { ViewerUi, ToolbarButton, ToolbarToggle } from './ViewerUi';
 export { HierarchyPanel } from './HierarchyPanel';
 export { ModelsPanel } from './ModelsPanel';
+export { PropertiesPanel } from './PropertiesPanel';
 export { Panel } from './Panel';
 export type { PanelOptions } from './Panel';
 export { ContextMenu } from './ContextMenu';

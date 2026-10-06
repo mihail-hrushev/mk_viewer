@@ -1,6 +1,6 @@
 /**
  * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre, the movable
- * panels it opens (model tree, models), and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
+ * panels it opens (model tree, models, properties), and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
  *
  *   const ui = createViewerUi(viewer);
  *   ui.addButton({ label: 'Section', title: 'Toggle section plane', onClick: () => ... });
@@ -12,6 +12,7 @@ import type { ViewerApi } from '../types';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { HierarchyPanel } from './HierarchyPanel';
 import { ModelsPanel } from './ModelsPanel';
+import { PropertiesPanel } from './PropertiesPanel';
 import { ensureStyles } from './styles';
 
 export interface ToolbarButton {
@@ -37,6 +38,11 @@ export interface ViewerUi {
   readonly hierarchy: HierarchyPanel;
   /** Models panel: open files, running loads, per-model show / hide / fit / isolate / unload. */
   readonly models: ModelsPanel;
+  /**
+   * Properties panel: the (inherited) properties of the first selected object, and a search over
+   * the property index (`viewer.findObjects`) whose result can be selected, isolated, framed or coloured.
+   */
+  readonly properties: PropertiesPanel;
   /**
    * Draws the canvas context menu (`contextMenu` requests of the viewer) and adds its own entries
    * Hide selected, Hide unselected and Show all (order -100).
@@ -120,6 +126,16 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       return models.isOpen;
     },
   });
+  let propsButton: HTMLButtonElement | null = null;
+  const properties = new PropertiesPanel(viewer, overlay, (open) => propsButton?.classList.toggle('mkv-on', open));
+  propsButton = addButton({
+    label: 'Properties',
+    title: 'Properties of the selection, and search by property',
+    onClick: () => {
+      properties.toggle();
+      return properties.isOpen;
+    },
+  });
   addButton({ label: 'Fit', title: 'Fit everything in view', onClick: () => viewer.fitToView(undefined, true) });
   const addToggle = (b: { label: string; title?: string; onClick: () => void }): ToolbarToggle => {
     const el = addButton({ label: b.label, title: b.title, onClick: () => b.onClick() });
@@ -196,6 +212,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     toolbar,
     hierarchy,
     models,
+    properties,
     menu,
     addButton,
     addToggle,
@@ -208,6 +225,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       win?.removeEventListener('resize', place);
       win?.removeEventListener('scroll', place, true);
       menu.dispose();
+      properties.dispose();
       models.dispose();
       hierarchy.dispose();
       overlay.remove();

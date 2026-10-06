@@ -23,6 +23,7 @@ npm run dev     # then open http://localhost:5173/ (examples)
 - [Quick start](#quick-start)
 - [The scene API by task](#the-scene-api-by-task)
 - [Loading models and federation](#loading-models-and-federation)
+  - [Properties and search](#properties-and-search)
 - [Writing a loader plugin](#writing-a-loader-plugin)
 - [Viewer plugins and the measurement tool](#viewer-plugins-and-the-measurement-tool)
 - [Controls](#controls)
@@ -380,8 +381,10 @@ georeferenced coordinates keep their precision). The models page loads a URL lis
 ```
 
 Each `Model` (see `src/loaders/types.ts`) has `stats`, `bounds`, a metadata `hierarchy` (node names,
-parents), `getProperties(objectId)`, and `setVisible`, `isolate`, `fitToView`, `setTransform`,
-`unload`. From [models.ts](examples/models.ts):
+parents, and per-node properties through `hierarchy.properties(node, inherited)`),
+`getProperties(objectId)`, a searchable property index `properties` (see
+[Properties and search](#properties-and-search)), and `setVisible`, `isolate`, `fitToView`,
+`setTransform`, `unload`. From [models.ts](examples/models.ts):
 
 ```ts
     row.append(
@@ -396,6 +399,87 @@ parents), `getProperties(objectId)`, and `setVisible`, `isolate`, `fitToView`, `
 The glTF plugin reads glTF 2.0 / GLB with `EXT_mesh_gpu_instancing` and `KHR_mesh_quantization`.
 Textures are ignored. `createGltfLoader(options)` sets the objectId granularity and plugs in decoders
 for compressed meshes.
+
+### Properties and search
+
+Every node of a model's hierarchy can carry properties: plain key / value pairs. The glTF plugin
+takes them from the `extras` object of each node, group nodes included. Exports from plant and BIM
+tools (Navisworks, PCF converters) usually put the data on the groups (an isometric, a spool) and
+leave the mesh leaves bare, so a lookup can include the ancestors:
+
+```ts
+const node = model.hierarchy.nodeOfObject(objectId);
+model.hierarchy.properties(node);       // the node's own properties, or undefined
+model.hierarchy.properties(node, true); // merged with all its ancestors', nearer nodes winning
+```
+
+Each model indexes its properties for search (`model.properties`). The index is built on the first
+query; `model.properties.build()` builds it up front and returns the time it took. To see what
+there is to search:
+
+```ts
+model.properties.keys();          // [{ key, count: nodes with it, distinct: values, numeric }, ...]
+model.properties.values('Spool'); // the distinct values, sorted case-insensitively
+viewer.propertyKeys();            // the keys of all loaded models, merged
+```
+
+A query names one `key` and selects values in one of four ways. The result holds the matching
+nodes and the `objectIds` of everything below them, ascending and without duplicates:
+
+```ts
+// one value
+const r = model.properties.find({ key: 'Category', equals: 'FABRICATION' });
+
+// a range of values by prefix
+model.properties.find({ key: 'Spool', startsWith: 'P-101-' });
+
+// a numeric range, inclusive (either bound may be left out; non-numeric values never match)
+model.properties.find({ key: 'Weight', min: 100, max: 500 });
+```
+
+The fourth form, `in`, takes a whole list of values: a spreadsheet column of thousands of spool
+names, say. It is answered in one pass, not one lookup per value, and `hits[i]` counts the nodes
+that matched value `i`, so the values that were not found fall out directly:
+
+```ts
+const names: string[] = column; // e.g. 3,000 spool names pasted from Excel
+const r = model.properties.find({ key: 'Spool', in: names });
+const missing = names.filter((_, i) => r.hits![i] === 0);
+```
+
+`viewer.findObjects(query)` runs the same query over every loaded model and merges the results:
+`objectIds` of all models together, `hits` summed over the models, and `matches` with each model's
+own result. The `objectIds` go straight into the per-object calls:
+
+```ts
+const { objectIds, hits } = viewer.findObjects({ key: 'Spool', in: names });
+viewer.select(objectIds);
+viewer.isolate(objectIds);
+viewer.setColor(objectIds, [1, 0.5, 0]);
+viewer.fitToView(objectIds, true);
+```
+
+Results are sorted id lists, so `sortedIntersection` (AND), `sortedUnion` (OR) and
+`sortedDifference` (NOT) combine them:
+
+```ts
+import { sortedDifference, sortedIntersection } from 'mk-viewer';
+
+const fab = viewer.findObjects({ key: 'Category', equals: 'FABRICATION' }).objectIds;
+const heavy = viewer.findObjects({ key: 'Weight', min: 100 }).objectIds;
+viewer.select(sortedIntersection(fab, heavy)); // fabrication items weighing 100 or more
+viewer.isolate(sortedDifference(fab, heavy));  // the lighter ones
+```
+
+Matching rules:
+
+- Values are compared as trimmed text, ignoring case; `caseSensitive: true` turns case on.
+- Numbers are matched by their text: `{ equals: 12 }` finds the stored value `12` or `'12'`.
+- Node names are indexed under the key `name`: `{ key: 'name', startsWith: 'Pump' }`.
+- Nested objects become dotted keys (`{ Pipe: { DN: 50 } }` is searched as `Pipe.DN`); every element
+  of an array is a value of its own.
+- A node matches by its *own* properties; the result is the node and its whole subtree, so a match
+  on a spool group returns all the pipe pieces below it.
 
 ## Writing a loader plugin
 
@@ -509,7 +593,7 @@ should still use a viewport meta tag and keep its own controls finger-sized (see
 ## Built-in toolbar and model tree
 
 The viewer itself draws no UI. `createViewerUi` adds an optional overlay on the canvas: a toolbar at
-the bottom centre and the model tree panel it opens.
+the bottom centre and the panels it opens (model tree, models, properties).
 
 ```ts
 import { Viewer, createViewerUi, gltfLoader } from 'mk-viewer';
@@ -529,7 +613,18 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - **Models** opens the models panel: open files (or drop them on the canvas), follow running loads
   with a cancel button, and show / hide, fit, isolate or unload each model. `ui.models.footer` is an
   empty container for your own content, and `ui.models.showError(text)` reports a failed load.
-- Both panels are `.mkv-panel` windows: drag the header to move them; they stay inside the canvas.
+- **Properties** opens the properties panel. Its top part shows the selected object: model, node
+  name and the node's properties merged with those of every node above it (`hierarchy.properties(node,
+  true)`), since exports such as Navisworks or PCF keep the data on the isometric and spool groups;
+  with several objects selected it shows the first. Below is a search over the property index
+  (`viewer.findObjects`): pick a key (the keys of all loaded models, plus `name` for node names) and
+  a mode: **equals**, **list** (paste one value per line, e.g. thousands of spool names from a
+  spreadsheet; Ctrl+Enter runs it), **starts with** or **range** (min / max). **Find** (or Enter)
+  reports "N of M values found, K objects" for a list, with the values that were not found in a
+  collapsible list and a **Copy missing** button (one per line), or "K objects in N nodes" otherwise.
+  **Select**, **Isolate**, **Fit**, **Colour** (with a colour picker) and **Clear colour** act on
+  the result. `ui.properties.search(query)` runs a search from code and shows it in the panel.
+- All panels are `.mkv-panel` windows: drag the header to move them; they stay inside the canvas.
   `new Panel(ui.element, { title, dock, height })` creates more of them for your own content.
 - **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
 - A right click on the canvas (long press on touch, where the browser reports one) opens a menu
