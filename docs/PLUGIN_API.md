@@ -26,6 +26,7 @@ Contents
 - [Rules](#rules)
 - [Walkthrough: the colour plugin](#walkthrough-the-colour-plugin)
 - [A larger example: the measurement plugin](#a-larger-example-the-measurement-plugin)
+- [A panel plugin: the status legend](#a-panel-plugin-the-status-legend)
 
 ## The contract
 
@@ -77,13 +78,13 @@ export function pickLogPlugin(): ViewerPlugin {
 **Registering.** An application installs plugins when it creates the viewer, or later:
 
 ```ts
-import { Viewer, createViewerUi, colorPlugin, measurePlugin, type MeasurePlugin } from 'mk-viewer';
+import { Viewer, createViewerUi, colorPlugin, measurePlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
 
-const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin()] }); // in this order
+const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin()] }); // in this order
 createViewerUi(viewer);                                         // optional built-in UI
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!;     // a plugin's own API
 viewer.use(pickLogPlugin());                                    // later: returns the instance
-viewer.plugins;                                                 // ['measure', 'color', 'pick-log']
+viewer.plugins;                                                 // ['measure', 'color', 'status', 'pick-log']
 viewer.removePlugin('pick-log');                                // uninstall; true when it was installed
 ```
 
@@ -311,6 +312,9 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 
+The status plugin ([below](#a-panel-plugin-the-status-legend)) is a complete toggle-plus-panel
+example.
+
 ### Models
 
 `viewer.models`, `viewer.getModelOf(objectId)`, `viewer.groupByModel(ids)`, the `modelLoaded` /
@@ -483,7 +487,7 @@ Registering it, as [`examples/models.ts`](../examples/models.ts) does (try it on
 
 ```ts
 const viewer = new Viewer(canvas, {
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin()],
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
 });
 const ui = createViewerUi(viewer); // draws the context menu
 ```
@@ -516,3 +520,53 @@ lines plus its overlay:
 [`examples/section-plugin.ts`](../examples/section-plugin.ts) is a ~60-line plugin outside the library
 (a "Cut" toggle that puts a section plane above the selection), written against the package exports
 only.
+
+## A panel plugin: the status legend
+
+`statusPlugin()` (`src/plugins/status/`) has no tool and no overlay: it is a **panel** over a
+**headless, asynchronous** API, and shows the parts the other two examples do not. The user pastes
+rows `Tag  Status  State  Colour` (tab separated; only the tag is mandatory, see the
+[README](../README.md#viewer-plugins-and-the-measurement-tool)), the plugin matches the tags
+against the loaded models and shows a legend of statuses and states with counts, from which the
+user selects and colours.
+
+- **A toolbar toggle and a panel** in the `ui(ui)` hook: `ui.addToggle({ label, title, onClick: ()
+  => panel.toggle() })` and `new Panel(ui.element, { title, dock: 'right', height: 'auto', onToggle:
+  (open) => { toggle.on = open; } })`, so the button follows the panel whichever way it was closed.
+  The panel's content (a textarea, buttons, the legend) goes into `panel.body`. The hook returns a
+  cleanup that unsubscribes, removes the toggle and disposes the panel; `dispose()` calls the same
+  cleanup. With the `ui: false` option the hook does nothing and the plugin is headless.
+- **Matching through the property index**: one `viewer.findObjects({ key, in: tags })` per state
+  (`key` defaults to `'name'`, the hierarchy node names; case-insensitive). The result's `objectIds`
+  (sorted, unique; a tag that matches a group node brings its whole subtree) become the state's
+  objects (the legend shows their number), and `hits` (per input value, the number of matching
+  nodes, 0 = not found) is kept as `StatusState.hits`, so a caller can tell which tags were not
+  found.
+- **Async resolution, one state per task**: `resolve()` walks the unresolved states with a
+  `setTimeout(0)` between them, so the legend shows up at once with pending counts ("…"), repaints
+  after every state and does not starve a running model load. `add()` and the `modelLoaded` /
+  `modelUnloaded` events (which invalidate every state) call `resolve()`; calling it while it runs
+  returns the running promise and makes the loop start over. `resolve(true)` re-matches everything.
+- **Colour overrides as plugin state**: `applyColors()` is `viewer.setColor(objectIds, color)` per
+  state; `remove(status)`, `clear()`, `resetColors()` and `dispose()` set the same objects back to
+  `null`. Unlike the colour plugin's user edits, these colours belong to the legend and go with it.
+- **A `changed` event the panel re-renders from**: every change of the legend (rows added, a status
+  removed or checked, a state resolved) emits `changed`; the panel's only subscriber rebuilds the
+  legend from `plugin.statuses` (a snapshot: copied arrays, live objects) and keeps nothing but
+  which statuses are unfolded. The headless API is complete without the panel, and tests use it
+  without a DOM.
+
+```ts
+import { Viewer, createViewerUi, statusPlugin, type StatusPlugin } from 'mk-viewer';
+
+const viewer = new Viewer(canvas, { plugins: [statusPlugin({ key: 'name', label: 'Status' })] });
+createViewerUi(viewer);                                     // toolbar button "Status" opens the panel
+const status = viewer.getPlugin<StatusPlugin>('status')!;
+
+status.on('changed', () => console.log(status.statuses));  // what the panel listens to
+status.add('304-SP001\tErection\tFab\tyellow\n440-SP003\tErection\tErected\t#00ff00');
+await status.resolve();                                     // matched against every loaded model
+status.statuses[0].states[0].hits;                          // Int32Array, matches per tag (0 = not found)
+status.select('Erection', 'Fab');                           // viewer.select(objectIdsOf(...))
+status.applyColors(['Erection']);                           // setColor per state; remove() undoes it
+```

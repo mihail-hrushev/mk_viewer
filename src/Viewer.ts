@@ -244,6 +244,8 @@ export class Viewer implements ViewerApi {
   private hoverX = -1;
   private hoverY = -1;
   private hoverInside = false;
+  /** The pointer is over the canvas (keyboard shortcuts such as F apply). */
+  private pointerOver = false;
   private hoverObject: number | null = null;
   private readonly resizeObserver: ResizeObserver | null;
   private disposed = false;
@@ -1288,8 +1290,18 @@ export class Viewer implements ViewerApi {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (e.defaultPrevented || isEditable(e.target)) return;
+    // F: frame the selection (everything when nothing is selected), like the WASD keys only while
+    // the pointer is over the canvas or the canvas has focus
+    if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      if (!this.pointerOver && document.activeElement !== this.canvas) return;
+      e.preventDefault();
+      const sel = this.scene.getSelection();
+      this.fitToView(sel.length > 0 ? sel : undefined, true);
+      return;
+    }
     const t = this.tool;
-    if (!t || e.key !== 'Escape' || e.defaultPrevented || isEditable(e.target)) return;
+    if (!t || e.key !== 'Escape') return;
     let handled = false;
     try {
       handled = t.onEscape?.() === true;
@@ -1623,6 +1635,7 @@ export class Viewer implements ViewerApi {
 
   private readonly onPointerMove = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return;
+    this.pointerOver = true;
     const tool = this.tool;
     if (tool) {
       if (e.buttons !== 0 || this.controls?.interacting) {
@@ -1647,6 +1660,7 @@ export class Viewer implements ViewerApi {
 
   private readonly onPointerLeave = (): void => {
     this.toolLeave();
+    this.pointerOver = false;
     this.hoverInside = false;
     this.setHover(null);
   };

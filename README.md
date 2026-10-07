@@ -537,7 +537,8 @@ const viewer = new Viewer(canvas, {
   loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
   // colorPlugin adds "Red" and "Reset colour" to the right-click menu
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin()],
+  // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
 });
 ```
 
@@ -571,6 +572,41 @@ every colour override (`viewer.clearColors()`, also those set by the application
 object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`,
 `name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
+**Status** (`statusPlugin`): the **Status** toolbar button opens a legend of statuses and states
+built from pasted rows, matched against the loaded models. One row per line, tab separated: `Tag
+Status  State  Colour` (a line without a tab is split on whitespace; columns beyond the fourth are
+ignored). Only the tag is mandatory: the status defaults to `Default`, the state to the tag, the
+colour to `#DDDDDD`. A colour is `#rgb` / `#rrggbb` (the `#` optional, case-insensitive) or a name
+(`red`, `green`, `blue`, `yellow`, `magenta`, `cyan`, `pink`, `lime`, `coral`, `gray`, `white`,
+`black`, `maroon`, ...; the whole list is the exported `NAMED_COLORS`); an unknown colour gets the
+default and is reported. Tags are matched against the hierarchy node names, case-insensitive (the
+`key` option matches another property key instead); a tag that matches a group node matches its
+whole subtree. Rows added later merge into the legend: a new status or state is created, a known
+one receives the tags, a later row with a colour other than the default recolours its state, and a
+tag listed under two states belongs to both (when both are coloured, the one applied later wins).
+Matching is asynchronous, one state per task, so the legend shows at once with pending counts and
+fills in; it runs again when a model is loaded or unloaded. In the panel: paste the rows and click
+**Add**; every status is a collapsible row with a checkbox, its object count and a trash icon that
+removes it (and its colours); unfolded, it lists its states with a colour swatch and the number of
+matched objects, and clicking a state selects them. **Colour** colours the objects of every checked
+status by state, **Reset** removes those colours, **Fit** frames the selected objects (the
+`F` key does the same anywhere over the canvas), **Clear** removes every status. Headless:
+`add(text | rows)` (returns `{ rows, invalidColors }`; nothing is matched synchronously), `await
+resolve()`, `statuses`, `objectIdsOf(status, state?)`, `select(status, state?)`,
+`applyColors(statuses?)` (default: the checked ones), `resetColors(statuses?)` (default: all),
+`remove(status)`, `clear()`, `setChecked(status, checked)`, `on('changed', fn)`;
+`parseStatusRows(text)` and `parseColor(text)` are exported as well. Options: `key`, `label`, `ui`
+(false: no button and no panel), `name`. The colours are `setColor` overrides; removing a status or
+the plugin removes them.
+
+```ts
+const status = viewer.getPlugin<StatusPlugin>('status')!;
+status.add('304-SP001\tErection\tFab\tyellow\n440-SP003\tErection\tErected\t#00ff00');
+await status.resolve();            // matched against every loaded model
+status.select('Erection', 'Fab');  // the objects of one state
+status.applyColors(['Erection']);  // colour every state of the status
+```
+
 ## Controls
 
 | action | mouse / pen | touch |
@@ -586,7 +622,8 @@ object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `l
 Keyboard: `W` / `S` move the camera forward / backward along the view direction, `A` / `D` shift it
 left / right, `E` / `C` move it up / down along the world up axis; hold `Shift` to move four times faster. Speed follows the zoom level (the distance to
 the orbit centre). The keys are read by physical position, so they work on any keyboard layout, and
-only while the pointer is over the canvas or the canvas has focus.
+only while the pointer is over the canvas or the canvas has focus. `F` frames the selection (the whole
+scene when nothing is selected), under the same condition.
 
 Moving with the keys switches to first-person mode: a left drag then looks around from where the
 camera stands instead of orbiting. Double click an object (or fit the view) to orbit again, around that object.
