@@ -80,7 +80,7 @@ export interface ViewerOptions {
    * Selection x-ray from the start: `true` for the defaults, or its options (see
    * `setSelectionXray`). Default off.
    */
-  selectionXray?: boolean | EdgeOptions;
+  selectionXray?: boolean | SelectionXrayOptions;
   /**
    * Viewer plugins (tools, overlays, UI additions; see docs/PLUGIN_API.md), installed in this
    * order at the end of construction. Not to be confused with `loaders` (file format plugins).
@@ -139,6 +139,23 @@ export interface EdgeInfo {
   color: [number, number, number];
   opacity: number;
   creaseAngle: number;
+}
+
+/** Options of the selection x-ray (`setSelectionXray`). */
+export interface SelectionXrayOptions {
+  /** sRGB line colour. Default [1, 0.62, 0.1], the selection outline colour. */
+  color?: Color;
+  /** 0..1. Default 1. */
+  opacity?: number;
+  /** Line width in CSS pixels (1..8). Default 2. */
+  width?: number;
+}
+
+/** The active selection x-ray settings (`getSelectionXray`). */
+export interface SelectionXrayInfo {
+  color: [number, number, number];
+  opacity: number;
+  width: number;
 }
 
 /** The active environment (`getEnvironment`, `environment` event). */
@@ -626,17 +643,19 @@ export interface ViewerApi {
   /** The active edge display settings, or null when edges are off. */
   getEdges(): EdgeInfo | null;
   /**
-   * Selection x-ray: the edges of the selected objects drawn on top of everything, so a selection
-   * stays visible through whatever is in front of it. The lines are found like the edge display
-   * (`setEdges`, same options) on a second image that holds only the selected objects, so they
-   * follow their silhouettes, creases and boundaries, including the hidden parts. Independent of
-   * the edge display. Costs a depth + id + normal target of its own and a pass over the draw items
-   * that hold selected objects whenever the view or the selection changes. Defaults: the selection
-   * outline colour `[1, 0.62, 0.1]`, opacity 1, crease angle 20. Default off.
+   * Selection x-ray: the border of the selection drawn on top of everything, so a selection stays
+   * visible through whatever is in front of it. The line follows the silhouette of the selected
+   * objects against everything that is not selected, hidden parts and holes included, but not the
+   * boundaries between selected objects nor the creases and edges inside them; it is `width` CSS
+   * pixels wide. Found on a second
+   * image that holds only the selected objects. Independent of the edge display. Costs an id +
+   * depth target of its own and a pass over the draw items that hold selected objects whenever the
+   * view or the selection changes. Defaults: the selection outline colour `[1, 0.62, 0.1]`,
+   * opacity 1, width 2. Default off.
    */
-  setSelectionXray(enabled: boolean, options?: EdgeOptions): void;
+  setSelectionXray(enabled: boolean, options?: SelectionXrayOptions): void;
   /** The active selection x-ray settings, or null when it is off. */
-  getSelectionXray(): EdgeInfo | null;
+  getSelectionXray(): SelectionXrayInfo | null;
 
   // --- tools and plugins ---
   /**

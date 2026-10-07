@@ -341,26 +341,28 @@ new Viewer(canvas, { edges: true });              // or edges: { creaseAngle: 30
 
 ### Selection x-ray
 
-`setSelectionXray` draws the edges of the selected objects on top of everything, so a selection
-stays visible through the walls, floors and equipment in front of it. The lines are found the same
-way as the edge display, on a second image that holds only the selected objects: their silhouettes,
-creases and boundaries, hidden parts included. Default off, and independent of `setEdges`.
+`setSelectionXray` draws the border of the selection on top of everything, so a selection stays
+visible through the walls, floors and equipment in front of it. The line follows the silhouette of
+the selected objects against everything that is not selected, hidden parts and holes included, but
+not the boundaries between selected objects nor the creases and edges inside them. It is found on
+a second image that holds only the selected objects. Default off, and independent of `setEdges`.
 
 ```ts
 viewer.setSelectionXray(true);                                           // defaults
-viewer.setSelectionXray(true, { color: [1, 0.62, 0.1], opacity: 1, creaseAngle: 20 });
+viewer.setSelectionXray(true, { color: [1, 0.62, 0.1], opacity: 1, width: 2 });
 viewer.setSelectionXray(false);
-viewer.getSelectionXray();                        // { color, opacity, creaseAngle } | null
+viewer.getSelectionXray();                        // { color, opacity, width } | null
 new Viewer(canvas, { selectionXray: true });      // or selectionXray: { color: [0, 1, 0] }
 ```
 
-- Same options as `setEdges`; the default colour is the selection outline colour (orange), the
-  default opacity 1.
+- Options: `color` (sRGB, default the selection outline colour, orange), `opacity` (0..1, default
+  1), `width` (line width in CSS pixels, 1..8, default 2; the line straddles the border, half on
+  each side).
 - The selection tint and outline stay as they are; the x-ray lines are drawn over them.
-- Cost while on and something is selected: a depth + id + normal target of its own (10 bytes per
-  pixel, 20 MB at 1920x1080) and, whenever the view or the selection changes, one pass over the
-  draw items that hold selected objects (a merged batch is drawn whole, its other objects are
-  dropped in the vertex shader), plus one fullscreen pass when presenting. With nothing selected,
+- Cost while on and something is selected: an id + depth target of its own (8 bytes per pixel,
+  16 MB at 1920x1080) and, whenever the view or the selection changes, one pass over the draw
+  items that hold selected objects (a merged batch is drawn whole, its other objects are dropped
+  in the vertex shader), plus one fullscreen pass when presenting. With nothing selected,
   or while off, nothing extra runs; switching it off frees the target. The built-in UI's Settings
   panel has a **Selected x-ray** switch; `examples/models.html?xray=1` starts with it on.
 

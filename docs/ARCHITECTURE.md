@@ -203,12 +203,14 @@ they are derived from whatever the targets hold when presenting, they are right 
 progressive images and never accumulate; colour / angle changes only re-present. Near / far /
 projection used for linearizing are snapshotted per image.
 
-**Selection x-ray** (`setSelectionXray`) reuses the same detector (the `EDGE_DETECT` GLSL chunk
-shared by the composite and `XRAY_EDGES_FS`) on a second `RenderTargets` without a colour
-attachment: depth, ids and normals of the selected fragments alone. `Renderer.drawXray` fills it
-before presenting with the `selectedId` uber pass (flag filter visible + selected, not ghosted,
-any material; the `EDGES` variant, section planes included, no lighting since nothing is shaded),
-submitting only the draw items that hold a selected fragment (collected from the selection through
+**Selection x-ray** (`setSelectionXray`) draws the border of the selection over everything:
+`XRAY_FS` marks a pixel when a pixel within `radius` of it is on the other side of the selection
+(selected next to not selected: the silhouette, holes included; not boundaries between selected
+objects, not creases). Its input is a second
+`RenderTargets` without a colour attachment holding the ids (with a depth test) of the selected
+fragments alone. `Renderer.drawXray` fills it before presenting with the `selectedId` uber pass
+(flag filter visible + selected, not ghosted, any material; section planes included, no lighting
+since nothing is shaded), submitting only the draw items that hold a selected fragment (collected from the selection through
 `FragmentList.item`, cached until the selection or the batching version changes) in full, so the
 vertex shader drops the other members. The target persists like the main one: it is redrawn only
 for a new image (camera), a selection change, a batching change or a resize, not for every still

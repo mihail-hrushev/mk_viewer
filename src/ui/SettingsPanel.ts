@@ -5,7 +5,7 @@
  * their `ui(ui)` hook). Every row re-reads its state when the panel opens and after any switch is
  * used, so settings changed from code show right; `refresh()` does it on demand.
  */
-import type { EdgeOptions, ViewerApi } from '../types';
+import type { EdgeOptions, SelectionXrayOptions, ViewerApi } from '../types';
 import { Panel } from './Panel';
 
 /** A row of the settings panel: a label and a switch bound to a boolean setting. */
@@ -58,10 +58,10 @@ export class SettingsPanel {
         viewer.setEdges(on, edges);
       },
     });
-    let xray: EdgeOptions = {};
+    let xray: SelectionXrayOptions = {};
     this.addToggle({
       label: 'Selected x-ray',
-      title: 'Draw the edges of the selected objects on top of everything, through what is in front of them',
+      title: 'Draw the borders of the selected objects on top of everything, through what is in front of them',
       get: () => viewer.getSelectionXray() !== null,
       set: (on) => {
         if (!on) xray = viewer.getSelectionXray() ?? xray;

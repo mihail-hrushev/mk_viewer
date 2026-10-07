@@ -51,6 +51,8 @@ export type {
   EnvironmentInfo,
   EdgeOptions,
   EdgeInfo,
+  SelectionXrayOptions,
+  SelectionXrayInfo,
   ViewerStats,
   ViewerEvents,
   Primitives,

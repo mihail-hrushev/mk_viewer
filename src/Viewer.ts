@@ -44,6 +44,8 @@ import type {
   ContextMenuRequest,
   EdgeInfo,
   EdgeOptions,
+  SelectionXrayInfo,
+  SelectionXrayOptions,
   EnvironmentInfo,
   EnvironmentOptions,
   EnvironmentSource,
@@ -239,7 +241,7 @@ export class Viewer implements ViewerApi {
   // edge display (null = off)
   private edgeInfo: EdgeInfo | null = null;
   // selection x-ray (null = off)
-  private xrayInfo: EdgeInfo | null = null;
+  private xrayInfo: SelectionXrayInfo | null = null;
 
   // pointer / hover
   private hoverInFlight = false;
@@ -1073,20 +1075,21 @@ export class Viewer implements ViewerApi {
     return copyEdgeInfo(this.edgeInfo);
   }
 
-  setSelectionXray(enabled: boolean, options: EdgeOptions = {}): void {
+  setSelectionXray(enabled: boolean, options: SelectionXrayOptions = {}): void {
     if (this.disposed) return;
     if (!enabled) {
       this.xrayInfo = null;
       this.renderer.setSelectionXray(null);
       return;
     }
-    const info = edgeOptions(options, XRAY_DEFAULT_COLOR, 1);
+    const info = xrayOptions(options);
     this.xrayInfo = info;
     this.renderer.setSelectionXray(info);
   }
 
-  getSelectionXray(): EdgeInfo | null {
-    return copyEdgeInfo(this.xrayInfo);
+  getSelectionXray(): SelectionXrayInfo | null {
+    const x = this.xrayInfo;
+    return x ? { color: [x.color[0], x.color[1], x.color[2]], opacity: x.opacity, width: x.width } : null;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1749,17 +1752,25 @@ function environmentOptions(o: EnvironmentOptions): { intensity: number; rotatio
   return { intensity, rotation, keyLight };
 }
 
-/** Default line colour of the selection x-ray: the selection outline colour. */
-const XRAY_DEFAULT_COLOR: [number, number, number] = [1, 0.62, 0.1];
-
 function copyEdgeInfo(e: EdgeInfo | null): EdgeInfo | null {
   return e ? { color: [e.color[0], e.color[1], e.color[2]], opacity: e.opacity, creaseAngle: e.creaseAngle } : null;
 }
 
-function edgeOptions(o: EdgeOptions, defaultColor: ArrayLike<number> = [0.1, 0.1, 0.1], defaultOpacity = 0.75): EdgeInfo {
-  const c = o.color ?? defaultColor;
+function xrayOptions(o: SelectionXrayOptions): SelectionXrayInfo {
+  const c = o.color ?? [1, 0.62, 0.1]; // the selection outline colour
   const color: [number, number, number] = [+c[0], +c[1], +c[2]];
-  const opacity = o.opacity ?? defaultOpacity;
+  const opacity = o.opacity ?? 1;
+  const width = o.width ?? 2;
+  if (!color.every((v) => v >= 0 && v <= 1)) throw new RangeError(`mk-viewer: x-ray color components must be in 0..1, got ${color}`);
+  if (!(opacity >= 0 && opacity <= 1)) throw new RangeError(`mk-viewer: x-ray opacity must be in 0..1, got ${opacity}`);
+  if (!(width >= 1 && width <= 8)) throw new RangeError(`mk-viewer: x-ray width must be in 1..8 pixels, got ${width}`);
+  return { color, opacity, width };
+}
+
+function edgeOptions(o: EdgeOptions): EdgeInfo {
+  const c = o.color ?? [0.1, 0.1, 0.1];
+  const color: [number, number, number] = [+c[0], +c[1], +c[2]];
+  const opacity = o.opacity ?? 0.75;
   const creaseAngle = o.creaseAngle ?? 20;
   if (!color.every((v) => v >= 0 && v <= 1)) throw new RangeError(`mk-viewer: edge color components must be in 0..1, got ${color}`);
   if (!(opacity >= 0 && opacity <= 1)) throw new RangeError(`mk-viewer: edge opacity must be in 0..1, got ${opacity}`);

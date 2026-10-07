@@ -94,9 +94,9 @@ void main() {
 `);
 
 /**
- * Edge detection over a scene target, shared by the EDGES variant of COMPOSITE_FS and by
- * XRAY_EDGES_FS. The host shader declares `u_idTex` (sampler2D, fragment index + 1) and includes
- * PACK_U32 first. Lines are found where neighbouring pixels of the target (+-1 px in x and y) differ
+ * Edge detection over a scene target (the EDGES variant of COMPOSITE_FS; kept as a chunk of its own
+ * so that another pass can run it on another target). The host shader declares `u_idTex`
+ * (sampler2D, fragment index + 1) and includes PACK_U32 first. Lines are found where neighbouring pixels of the target (+-1 px in x and y) differ
  * in
  *  - face normal (u_normalTex, RG8 octahedral, written by the uber EDGES variant) by more than the
  *    crease angle; coplanar triangles share the normal, so diagonals of flat faces never show;
@@ -355,30 +355,50 @@ export function compositeFragmentSource(options: { edges?: boolean } = {}): stri
 export const COMPOSITE_FS = compositeFragmentSource();
 
 /**
- * Selection x-ray: the edge display (EDGE_DETECT) of a second scene target holding only the selected
- * fragments (Renderer's x-ray pass: their depth, face normals and ids, everything else cleared),
- * drawn over the presented image so that the edges of the selection show through whatever is in
- * front of it. Pixels without a line are discarded; the rest get the line colour with the weight as
- * alpha. Recipe: after composite / present, same framebuffer (canvas), blend on with SRC_ALPHA /
- * ONE_MINUS_SRC_ALPHA, depth test off.
- * u_idTex (sampler2D, the x-ray target's ids), u_edgeColor (vec4, sRGB rgb + opacity), u_offset
- * (ivec2, as present) and the EDGE_DETECT uniforms (of the x-ray target).
+ * Selection x-ray: the borders of the selected objects from a second scene target holding only the
+ * selected fragments (Renderer's x-ray pass: their ids with a depth test, everything else 0),
+ * drawn over the presented image so that the selection shows through whatever is in front of it.
+ * A pixel gets the line when a pixel within u_radius of it (8 directions, every distance up to
+ * the radius) is on the other side of the selection: selected (id != 0) next to not selected, or
+ * the reverse. That is the silhouette of the selection against everything else, holes included,
+ * on both sides of the boundary, so the line is about 2 * u_radius pixels wide. Boundaries between
+ * selected objects, creases and edges inside them are not lines. Other pixels are discarded. Recipe: after
+ * composite / present, same framebuffer (canvas), blend on with SRC_ALPHA / ONE_MINUS_SRC_ALPHA,
+ * depth test off.
+ * u_idTex (sampler2D, the x-ray target's ids), u_color (vec4, sRGB rgb + opacity), u_radius (int,
+ * target pixels, >= 1), u_offset (ivec2, as present).
  */
-export const XRAY_EDGES_FS = assembleShader(/* glsl */ `
+export const XRAY_FS = assembleShader(/* glsl */ `
 ${PRECISION}
 uniform highp sampler2D u_idTex;
-uniform vec4 u_edgeColor;
+uniform vec4 u_color;
+uniform int u_radius;
 uniform ivec2 u_offset;
 out vec4 o_color;
 
 ${PACK_U32}
-${EDGE_DETECT}
+
+const ivec2 DIRS[8] = ivec2[8](
+  ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+  ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1)
+);
 
 void main() {
+  ivec2 size = textureSize(u_idTex, 0);
   ivec2 p = ivec2(gl_FragCoord.xy) + u_offset;
-  float w = edgeWeight(p, unpackU32(texelFetch(u_idTex, p, 0)));
-  if (w <= 0.0) discard;
-  o_color = vec4(u_edgeColor.rgb, w * u_edgeColor.a);
+  bool selected = unpackU32(texelFetch(u_idTex, p, 0)) != 0u;
+  bool border = false;
+  for (int d = 1; d <= u_radius && !border; ++d) {
+    for (int i = 0; i < 8; ++i) {
+      ivec2 q = clamp(p + DIRS[i] * d, ivec2(0), size - 1);
+      if ((unpackU32(texelFetch(u_idTex, q, 0)) != 0u) != selected) {
+        border = true;
+        break;
+      }
+    }
+  }
+  if (!border) discard;
+  o_color = u_color;
 }
 `);
 

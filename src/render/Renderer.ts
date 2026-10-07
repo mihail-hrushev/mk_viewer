@@ -78,6 +78,16 @@ export interface RenderEnvironmentOptions {
   keyLight: number;
 }
 
+/** Selection x-ray settings (validated by the Viewer). */
+export interface RenderXrayOptions {
+  /** sRGB rgb. */
+  color: ArrayLike<number>;
+  /** 0..1 */
+  opacity: number;
+  /** Line width, CSS pixels. */
+  width: number;
+}
+
 /** Edge display settings (validated by the Viewer). */
 export interface RenderEdgeOptions {
   /** sRGB rgb. */
@@ -272,20 +282,11 @@ export class Renderer {
     normalTex: null,
   };
 
-  // selection x-ray (null = off): the edges of the selected fragments over everything, found on a
-  // target holding only them (depth, ids, normals; no colour), see drawXray
-  private xray: RenderEdgeOptions | null = null;
+  // selection x-ray (null = off): the borders of the selected fragments over everything, found on a
+  // target holding only them (ids + depth; no colour, no normals), see drawXray
+  private xray: RenderXrayOptions | null = null;
   private xrayTargets: RenderTargets | null = null;
-  private readonly xrayStyle: EdgeStyle = {
-    color: new Float32Array(4),
-    cosAngle: 0,
-    near: 0,
-    far: 1,
-    orthographic: false,
-    pixelSize: 0,
-    depthTex: null,
-    normalTex: null,
-  };
+  private readonly xrayColor = new Float32Array(4);
   /** Image the x-ray target holds, and whether it must be redrawn for other reasons. */
   private xrayImage = 0;
   private xrayDirty = true;
@@ -449,19 +450,18 @@ export class Renderer {
   }
 
   /**
-   * Selection x-ray: the edges of the selected fragments drawn over the presented image, through
+   * Selection x-ray: the borders of the selected fragments drawn over the presented image, through
    * whatever is in front of them (`drawXray`), or null for off. Changing the options only
    * re-presents; switching it off frees its target.
    */
-  setSelectionXray(options: RenderEdgeOptions | null): void {
+  setSelectionXray(options: RenderXrayOptions | null): void {
     this.xray = options;
     if (options) {
-      const c = this.xrayStyle.color as Float32Array;
+      const c = this.xrayColor;
       c[0] = options.color[0];
       c[1] = options.color[1];
       c[2] = options.color[2];
       c[3] = options.opacity;
-      this.xrayStyle.cosAngle = Math.cos((options.creaseAngle * Math.PI) / 180);
       this.post.prepareXray();
       this.ensurePrograms();
     } else if (this.xrayTargets) {
@@ -483,9 +483,9 @@ export class Renderer {
     return (this.sectionCount > 0 ? 1 : 0) | (this.envUniforms ? 2 : 0) | (this.edges ? 4 : 0);
   }
 
-  /** Variant of the x-ray pass: face normals and the section planes; no lighting (no colour output). */
+  /** Variant of the x-ray pass: the section planes only (ids are the only output). */
   private xrayKey(): number {
-    return (this.sectionCount > 0 ? 1 : 0) | 4;
+    return this.sectionCount > 0 ? 1 : 0;
   }
 
   /** Compiles the program variants the current settings need (outside the frame loop). */
@@ -1251,26 +1251,21 @@ export class Renderer {
       this.post.drawPresent(t.colorTex!);
     }
     if (xray) {
-      // the lines of the x-ray target over everything; its camera is the image's (edgeStyle)
-      const xt = this.xrayTargets!;
-      const xs = this.xrayStyle;
-      const es = this.edgeStyle;
-      xs.near = es.near;
-      xs.far = es.far;
-      xs.orthographic = es.orthographic;
-      xs.pixelSize = es.pixelSize;
-      xs.depthTex = xt.depthTex;
-      xs.normalTex = xt.normalTex;
+      // the border of the selection in the x-ray target over everything; the width is in CSS pixels, the
+      // line covers `radius` target pixels on each side of a boundary
+      const canvas = this.ctx.canvas as HTMLCanvasElement;
+      const dpr = t.height / (canvas.clientHeight || t.height);
+      const radius = Math.max(1, Math.round((this.xray!.width * (dpr > 0 ? dpr : 1)) / 2));
       s.setBlend(true);
       s.setBlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      this.post.drawXrayEdges(xt.idTex!, xs);
+      this.post.drawXray(this.xrayTargets!.idTex!, this.xrayColor, radius);
       s.setBlend(false);
     }
   }
 
   /**
-   * Selection x-ray pass: the selected fragments alone (depth, ids, face normals; no colour) into
-   * the x-ray target, with the image's camera, independent of the progressive image. Only the draw
+   * Selection x-ray pass: the selected fragments alone (ids with a depth test; no colour, no
+   * normals) into the x-ray target, with the image's camera, independent of the progressive image. Only the draw
    * items holding a selected fragment are submitted, in full (the vertex shader drops the other
    * fragments of an item), so the cost follows the selection rather than the scene. Nothing is
    * drawn while the target is current: same image, selection and batching.
@@ -1281,7 +1276,6 @@ export class Renderer {
     let t = this.xrayTargets;
     if (!t) {
       t = this.xrayTargets = new RenderTargets(this.ctx, { color: false });
-      t.setNormals(true);
       this.xrayDirty = true;
     }
     if (t.resize(this.targets.width, this.targets.height)) this.xrayDirty = true;
@@ -1291,7 +1285,7 @@ export class Renderer {
     if (this.xrayItemsStale || this.xrayStructure !== structure) this.collectXrayItems();
     this.xrayStructure = structure;
 
-    t.clear(); // binds it: ids, normals and depth cleared
+    t.clear(); // binds it: ids and depth cleared
     const k = this.xrayKey();
     this.ensureProgram(k);
     const prog = this.variants[k]!;
