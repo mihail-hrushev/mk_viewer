@@ -23,6 +23,10 @@ const CSS = `
 .mkv-panel-head{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;font-weight:600;cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
 .mkv-panel-head span{flex:1}
 .mkv-panel-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.mkv-panel-foot{flex:0 0 auto;display:flex;justify-content:flex-end;height:12px;border-top:1px solid #3c4043}
+.mkv-panel-grip{width:14px;height:11px;cursor:nwse-resize;touch-action:none;opacity:.6;
+  background:linear-gradient(135deg,transparent 0 50%,#9aa0a6 50% 60%,transparent 60% 72%,#9aa0a6 72% 82%,transparent 82%) no-repeat right bottom/10px 10px}
+.mkv-panel-grip:hover{opacity:1}
 .mkv-panel-body.mkv-pad{padding:0 10px 10px;overflow:auto;gap:6px}
 .mkv-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .mkv-grow{flex:1 1 120px;overflow-wrap:anywhere}

@@ -3,6 +3,7 @@ export type { ViewerUi, ToolbarButton, ToolbarToggle } from './ViewerUi';
 export { HierarchyPanel } from './HierarchyPanel';
 export { ModelsPanel } from './ModelsPanel';
 export { PropertiesPanel } from './PropertiesPanel';
+export { SearchPanel } from './SearchPanel';
 export { Panel } from './Panel';
 export type { PanelOptions } from './Panel';
 export { ContextMenu } from './ContextMenu';

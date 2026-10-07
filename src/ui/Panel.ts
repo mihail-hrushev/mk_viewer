@@ -1,6 +1,7 @@
 /**
- * Floating window of the built-in UI (`.mkv-panel`): a header with title and close button, and a
- * body for content. It is moved by dragging the header and always stays inside the canvas overlay.
+ * Floating window of the built-in UI (`.mkv-panel`): a header with title and close button, a body
+ * for content and a footer strip whose corner grip resizes the panel. It is moved by dragging the
+ * header and always stays inside the canvas overlay.
  */
 export interface PanelOptions {
   title: string;
@@ -11,8 +12,14 @@ export interface PanelOptions {
    * would not fit).
    */
   height?: 'fill' | 'auto';
+  /** Draw the footer with the resize grip (default true). */
+  resizable?: boolean;
   onToggle?: (open: boolean) => void;
 }
+
+/** Smallest size the grip can drag a panel to, in CSS pixels. */
+const MIN_WIDTH = 180;
+const MIN_HEIGHT = 120;
 
 export class Panel {
   readonly element: HTMLElement;
@@ -29,6 +36,15 @@ export class Panel {
   private grabY = 0;
   /** True once the user has moved the panel (it is then positioned by left/top). */
   private moved = false;
+  /** Pointer dragging the resize grip, or -1. */
+  private sizePointer = -1;
+  /** Pointer position and panel size when the resize started. */
+  private sizeX = 0;
+  private sizeY = 0;
+  private sizeW = 0;
+  private sizeH = 0;
+  /** True once the user has resized the panel (it then has an explicit width and height). */
+  private sized = false;
 
   constructor(parent: HTMLElement, options: PanelOptions) {
     const doc = parent.ownerDocument;
@@ -58,6 +74,19 @@ export class Panel {
     this.body = doc.createElement('div');
     this.body.className = 'mkv-panel-body';
     el.append(head, this.body);
+    if (options.resizable !== false) {
+      const foot = doc.createElement('div');
+      foot.className = 'mkv-panel-foot';
+      const grip = doc.createElement('div');
+      grip.className = 'mkv-panel-grip';
+      grip.title = 'Drag to resize';
+      grip.addEventListener('pointerdown', (e) => this.startResize(e, grip));
+      grip.addEventListener('pointermove', (e) => this.resize(e));
+      grip.addEventListener('pointerup', (e) => this.endResize(e, grip));
+      grip.addEventListener('pointercancel', (e) => this.endResize(e, grip));
+      foot.append(grip);
+      el.append(foot);
+    }
     parent.append(el);
 
     // a moved panel must stay reachable when the canvas shrinks
@@ -98,10 +127,22 @@ export class Panel {
     if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
     const parent = this.element.parentElement;
     if (!parent) return;
-    const p = parent.getBoundingClientRect();
+    const r = this.detach(parent);
+    this.dragPointer = e.pointerId;
+    this.grabX = e.clientX - r.left;
+    this.grabY = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+
+  /**
+   * Switches the panel from the default docking to an explicit left/top position (the first time
+   * it is moved or resized) and returns its rectangle.
+   */
+  private detach(parent: HTMLElement): DOMRect {
     const r = this.element.getBoundingClientRect();
     if (!this.moved) {
-      // switch from the default docking to an explicit position
+      const p = parent.getBoundingClientRect();
       const s = this.element.style;
       s.left = `${r.left - p.left}px`;
       s.top = `${r.top - p.top}px`;
@@ -109,11 +150,7 @@ export class Panel {
       s.right = s.bottom = 'auto';
       this.moved = true;
     }
-    this.dragPointer = e.pointerId;
-    this.grabX = e.clientX - r.left;
-    this.grabY = e.clientY - r.top;
-    head.setPointerCapture(e.pointerId);
-    e.preventDefault();
+    return r;
   }
 
   private drag(e: PointerEvent): void {
@@ -146,8 +183,49 @@ export class Panel {
     const parent = this.element.parentElement;
     if (!parent) return;
     const el = this.element;
-    // never taller than the canvas
-    if (!this.autoHeight && el.offsetHeight > parent.clientHeight) el.style.height = `${parent.clientHeight}px`;
+    // never larger than the canvas
+    if ((this.sized || !this.autoHeight) && el.offsetHeight > parent.clientHeight) el.style.height = `${parent.clientHeight}px`;
+    if (this.sized && el.offsetWidth > parent.clientWidth) el.style.width = `${parent.clientWidth}px`;
     this.place(el.offsetLeft, el.offsetTop);
+  }
+
+  // --- resizing the panel by the grip in its footer ----------------------------------------------
+
+  private startResize(e: PointerEvent, grip: HTMLElement): void {
+    if (e.button !== 0) return;
+    const parent = this.element.parentElement;
+    if (!parent) return;
+    const r = this.detach(parent);
+    const s = this.element.style;
+    s.width = `${r.width}px`;
+    s.height = `${r.height}px`;
+    s.maxHeight = 'none';
+    this.sized = true;
+    this.sizePointer = e.pointerId;
+    this.sizeX = e.clientX;
+    this.sizeY = e.clientY;
+    this.sizeW = r.width;
+    this.sizeH = r.height;
+    grip.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+
+  private resize(e: PointerEvent): void {
+    if (e.pointerId !== this.sizePointer) return;
+    const parent = this.element.parentElement;
+    if (!parent) return;
+    const el = this.element;
+    const maxW = Math.max(MIN_WIDTH, parent.clientWidth - el.offsetLeft);
+    const maxH = Math.max(MIN_HEIGHT, parent.clientHeight - el.offsetTop);
+    const w = Math.min(Math.max(MIN_WIDTH, this.sizeW + e.clientX - this.sizeX), maxW);
+    const h = Math.min(Math.max(MIN_HEIGHT, this.sizeH + e.clientY - this.sizeY), maxH);
+    el.style.width = `${Math.round(w)}px`;
+    el.style.height = `${Math.round(h)}px`;
+  }
+
+  private endResize(e: PointerEvent, grip: HTMLElement): void {
+    if (e.pointerId !== this.sizePointer) return;
+    this.sizePointer = -1;
+    if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId);
   }
 }

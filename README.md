@@ -613,19 +613,22 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - **Models** opens the models panel: open files (or drop them on the canvas), follow running loads
   with a cancel button, and show / hide, fit, isolate or unload each model. `ui.models.footer` is an
   empty container for your own content, and `ui.models.showError(text)` reports a failed load.
-- **Properties** opens the properties panel. Its top part shows the selected object: model, node
-  name and the node's properties merged with those of every node above it (`hierarchy.properties(node,
-  true)`), since exports such as Navisworks or PCF keep the data on the isometric and spool groups;
-  with several objects selected it shows the first. Below is a search over the property index
-  (`viewer.findObjects`): pick a key (the keys of all loaded models, plus `name` for node names) and
-  a mode: **equals**, **list** (paste one value per line, e.g. thousands of spool names from a
-  spreadsheet; Ctrl+Enter runs it), **starts with** or **range** (min / max). **Find** (or Enter)
-  reports "N of M values found, K objects" for a list, with the values that were not found in a
-  collapsible list and a **Copy missing** button (one per line), or "K objects in N nodes" otherwise.
-  **Select**, **Isolate**, **Fit**, **Colour** (with a colour picker) and **Clear colour** act on
-  the result. `ui.properties.search(query)` runs a search from code and shows it in the panel.
-- All panels are `.mkv-panel` windows: drag the header to move them; they stay inside the canvas.
-  `new Panel(ui.element, { title, dock, height })` creates more of them for your own content.
+- **Properties** opens the properties panel: the selected object's model, node name and the node's
+  properties merged with those of every node above it (`hierarchy.properties(node, true)`), since
+  exports such as Navisworks or PCF keep the data on the isometric and spool groups; with several
+  objects selected it shows the first.
+- **Search** opens the search panel, a search over the property index (`viewer.findObjects`): pick
+  a key (the keys of all loaded models, plus `name` for node names) and a mode: **equals**, **list**
+  (paste one value per line, e.g. thousands of spool names from a spreadsheet; Ctrl+Enter runs it),
+  **starts with** or **range** (min / max). **Find** (or Enter) reports "N of M values found, K
+  objects" for a list, with the values that were not found in a collapsible list and a **Copy
+  missing** button (one per line), or "K objects in N nodes" otherwise. **Select**, **Isolate**,
+  **Fit**, **Colour** (with a colour picker) and **Clear colour** act on the result.
+  `ui.search.find(query)` runs a search from code and shows it in the panel; `ui.search.resultIds`
+  is the last result.
+- All panels are `.mkv-panel` windows: drag the header to move them, and the grip in the footer's
+  corner to resize them; they stay inside the canvas. `new Panel(ui.element, { title, dock, height,
+  resizable })` creates more of them for your own content.
 - **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
 - A right click on the canvas (long press on touch, where the browser reports one) opens a menu
   with **Hide selected**, **Hide unselected**, **Show all** and the entries of viewer plugins.

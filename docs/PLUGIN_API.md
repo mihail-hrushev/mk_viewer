@@ -306,7 +306,8 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - `ui.addToggle({ label, title, onClick })` returns `{ element, on, remove() }`: a toolbar button
   whose on / off look you set (`toggle.on = active`).
 - `ui.addButton({ label, title, onClick })` for plain actions (returns the `<button>`).
-- `ui.element` is the UI overlay; `new Panel(ui.element, { title })` makes a movable panel.
+- `ui.element` is the UI overlay; `new Panel(ui.element, { title })` makes a movable, resizable
+  panel (`resizable: false` drops the footer grip).
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 
