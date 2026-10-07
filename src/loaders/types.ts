@@ -271,12 +271,12 @@ export interface ModelHierarchy {
 // ------------------------------------------------------------------------------------------------
 
 /**
- * One query against the property index. One of `equals`, `in`, `startsWith` or a `min` / `max`
- * range selects the values (when several are given, `in` wins over `equals` over `startsWith` over
- * the range; a query with only `key` matches nothing); `key` names the property (node names are
- * indexed under the key `name`). Matching is on the trimmed text of the value and ignores case
- * unless `caseSensitive`. A node matches when one of its *own* properties matches; the objects under
- * it (its whole subtree) are the result.
+ * One query against the property index. One of `equals`, `in`, `startsWith`, `matches` or a
+ * `min` / `max` range selects the values (when several are given, `in` wins over `equals` over
+ * `startsWith` over `matches` over the range; a query with only `key` matches nothing); `key` names
+ * the property (node names are indexed under the key `name`). Matching is on the trimmed text of
+ * the value and ignores case unless `caseSensitive`. A node matches when one of its *own*
+ * properties matches; the objects under it (its whole subtree) are the result.
  */
 export interface PropertyQuery {
   key: string;
@@ -286,6 +286,12 @@ export interface PropertyQuery {
   in?: readonly (string | number)[] | Float64Array | Float32Array | Int32Array | Uint32Array;
   /** Values starting with this text. */
   startsWith?: string;
+  /**
+   * Values matching a regular expression, tested against each distinct value (not anchored: use
+   * `^` and `$` for a whole-value match). A string is compiled with the `i` flag unless
+   * `caseSensitive`; a `RegExp` is used with its own flags. An invalid pattern throws a SyntaxError.
+   */
+  matches?: string | RegExp;
   /** Numeric range, inclusive; values that do not parse as numbers never match. A NaN bound counts as absent. */
   min?: number;
   max?: number;

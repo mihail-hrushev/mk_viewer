@@ -164,6 +164,26 @@ describe('PropertyIndex: find', () => {
     expect(idx.find({ key: 'Spool', startsWith: 'zzz' }).values).toEqual([]);
   });
 
+  it('matches: regular expression over the distinct values', () => {
+    const idx = new PropertyIndexImpl(spools());
+    // not anchored, case-insensitive by default
+    const r = idx.find({ key: 'Spool', matches: 'sp00[12]$' });
+    expect(r.values).toEqual(['ISO-A_SP001', 'ISO-A_SP002', 'iso-b_sp001']);
+    expect(arr(r.objectIds)).toEqual([100, 101, 102, 103, 104]);
+    expect(r.hits).toBeNull();
+    expect(idx.find({ key: 'Spool', matches: '^iso-[ab]_sp001$' }).values).toEqual(['ISO-A_SP001', 'iso-b_sp001']);
+    expect(idx.find({ key: 'Spool', matches: '^iso-', caseSensitive: true }).values).toEqual(['iso-b_sp001']);
+    // a RegExp keeps its own flags; g / y are dropped so the test is stateless
+    expect(idx.find({ key: 'Spool', matches: /^ISO-A/ }).values).toEqual(['ISO-A_SP001', 'ISO-A_SP002']);
+    expect(idx.find({ key: 'Spool', matches: /^iso-a/i }).values).toEqual(['ISO-A_SP001', 'ISO-A_SP002']);
+    expect(idx.find({ key: 'Spool', matches: /SP00/g }).values).toEqual(['ISO-A_SP001', 'ISO-A_SP002']);
+    expect(idx.find({ key: 'Spool', matches: /SP00/g }).values).toEqual(['ISO-A_SP001', 'ISO-A_SP002']);
+    expect(idx.find({ key: 'name', matches: '^(pipe|flange)$' }).nodes.length).toBe(4);
+    expect(idx.find({ key: 'Spool', matches: 'zzz' }).values).toEqual([]);
+    expect(idx.find({ key: 'nope', matches: '.' }).values).toEqual([]);
+    expect(() => idx.find({ key: 'Spool', matches: '(' })).toThrow(SyntaxError);
+  });
+
   it('numeric range, inclusive, ignoring non-numeric values', () => {
     const idx = new PropertyIndexImpl(spools());
     expect(idx.find({ key: 'Weight', min: 10, max: 70.4 }).values).toEqual(['12', '70.4']);

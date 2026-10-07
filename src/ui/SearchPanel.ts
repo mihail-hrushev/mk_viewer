@@ -1,19 +1,20 @@
 /**
  * Search panel: a search over the property index of every loaded model (`viewer.findObjects`) by
  * key and value: one value, a pasted list of thousands of values (with the values that were not
- * found, ready to copy), a prefix or a numeric range. The result's objectIds can be selected,
+ * found, ready to copy), a prefix, a regular expression or a numeric range. The result's objectIds can be selected,
  * isolated, framed or coloured; they stay the `Float64Array` the index returns.
  */
 import type { PropertySearch, ViewerApi } from '../types';
 import type { PropertyQuery } from '../loaders/types';
 import { Panel } from './Panel';
 
-type Mode = 'equals' | 'in' | 'startsWith' | 'range';
+type Mode = 'equals' | 'in' | 'startsWith' | 'matches' | 'range';
 
 const MODES: { mode: Mode; label: string }[] = [
   { mode: 'equals', label: 'equals' },
   { mode: 'in', label: 'list' },
   { mode: 'startsWith', label: 'starts with' },
+  { mode: 'matches', label: 'regex' },
   { mode: 'range', label: 'range' },
 ];
 
@@ -232,10 +233,13 @@ export class SearchPanel {
 
   private showMode(): void {
     const mode = this.modeSelect.value as Mode;
-    (this.valueInput.parentElement as HTMLElement).hidden = mode !== 'equals' && mode !== 'startsWith';
+    const text = mode === 'equals' || mode === 'startsWith' || mode === 'matches';
+    (this.valueInput.parentElement as HTMLElement).hidden = !text;
     this.listInput.hidden = mode !== 'in';
     this.rangeLine.hidden = mode !== 'range';
-    this.valueInput.placeholder = mode === 'startsWith' ? 'Prefix; Enter finds' : 'Value; Enter finds';
+    this.valueInput.placeholder =
+      mode === 'startsWith' ? 'Prefix; Enter finds' : mode === 'matches' ? 'Regular expression, e.g. ^P-10[1-3]-; Enter finds' : 'Value; Enter finds';
+    this.valueInput.title = mode === 'matches' ? 'JavaScript regular expression, case-insensitive; ^ and $ anchor to the whole value' : '';
   }
 
   /** Runs the search described by the controls. */
@@ -244,11 +248,12 @@ export class SearchPanel {
     if (!key) return;
     const mode = this.modeSelect.value as Mode;
     const query: PropertyQuery = { key };
-    if (mode === 'equals' || mode === 'startsWith') {
-      const v = this.valueInput.value.trim();
-      if (!v) return this.clearResult('Enter a value.');
+    if (mode === 'equals' || mode === 'startsWith' || mode === 'matches') {
+      const v = mode === 'matches' ? this.valueInput.value : this.valueInput.value.trim();
+      if (!v) return this.clearResult(mode === 'matches' ? 'Enter a regular expression.' : 'Enter a value.');
       if (mode === 'equals') query.equals = v;
-      else query.startsWith = v;
+      else if (mode === 'startsWith') query.startsWith = v;
+      else query.matches = v;
     } else if (mode === 'in') {
       const values = parseList(this.listInput.value);
       if (values.length === 0) return this.clearResult('Paste one value per line.');
@@ -263,6 +268,7 @@ export class SearchPanel {
     try {
       this.find(query);
     } catch (e) {
+      // e.g. an invalid regular expression (SyntaxError)
       this.clearResult(`Search failed: ${(e as { message?: string })?.message ?? e}`);
     }
   }

@@ -462,11 +462,13 @@ describe('PropertyIndex edge: numeric ranges', () => {
 describe('PropertyIndex edge: query combination', () => {
   const idx = () => new PropertyIndexImpl(flat([{ t: 'a' }, { t: 'b' }, { t: 'c' }, { t: '5' }]));
 
-  it('precedence is in > equals > startsWith > range (documented in PropertyQuery)', () => {
+  it('precedence is in > equals > startsWith > matches > range (documented in PropertyQuery)', () => {
     const i = idx();
     expect(i.find({ key: 't', equals: 'a', in: ['b'] }).values).toEqual(['b']);
     expect(i.find({ key: 't', equals: 'a', in: ['b'] }).hits).not.toBeNull();
     expect(i.find({ key: 't', equals: 'a', startsWith: 'b' }).values).toEqual(['a']);
+    expect(i.find({ key: 't', startsWith: 'c', matches: 'a' }).values).toEqual(['c']);
+    expect(i.find({ key: 't', matches: 'a', min: 0 }).values).toEqual(['a']);
     expect(i.find({ key: 't', startsWith: 'c', min: 0 }).values).toEqual(['c']);
     expect(i.find({ key: 't', equals: 'a', min: 0 }).values).toEqual(['a']);
   });

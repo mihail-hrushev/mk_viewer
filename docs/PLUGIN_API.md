@@ -324,7 +324,7 @@ Properties are searchable. `viewer.findObjects(query)` searches every loaded mod
 queries and the per-model `matches`; `viewer.propertyKeys()` lists the keys there are. Per model,
 `model.properties` has the same `find(query)` plus `keys()`, `values(key)` and `objectsUnder(node)`,
 and `model.hierarchy.properties(node, inherited)` reads one node's properties (with `inherited`,
-merged with its ancestors'). A query is `{ key, equals | in | startsWith | min / max,
+merged with its ancestors'). A query is `{ key, equals | in | startsWith | matches | min / max,
 caseSensitive? }`; the README section [Properties and search](../README.md#properties-and-search)
 has the details. Colouring every fabrication part:
 

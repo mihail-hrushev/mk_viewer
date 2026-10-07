@@ -423,7 +423,7 @@ model.properties.values('Spool'); // the distinct values, sorted case-insensitiv
 viewer.propertyKeys();            // the keys of all loaded models, merged
 ```
 
-A query names one `key` and selects values in one of four ways. The result holds the matching
+A query names one `key` and selects values in one of five ways. The result holds the matching
 nodes and the `objectIds` of everything below them, ascending and without duplicates:
 
 ```ts
@@ -433,11 +433,14 @@ const r = model.properties.find({ key: 'Category', equals: 'FABRICATION' });
 // a range of values by prefix
 model.properties.find({ key: 'Spool', startsWith: 'P-101-' });
 
+// a regular expression (string or RegExp; not anchored, so ^ and $ pin it to the whole value)
+model.properties.find({ key: 'Spool', matches: '^P-10[1-3]-.*-0[0-9]$' });
+
 // a numeric range, inclusive (either bound may be left out; non-numeric values never match)
 model.properties.find({ key: 'Weight', min: 100, max: 500 });
 ```
 
-The fourth form, `in`, takes a whole list of values: a spreadsheet column of thousands of spool
+The fifth form, `in`, takes a whole list of values: a spreadsheet column of thousands of spool
 names, say. It is answered in one pass, not one lookup per value, and `hits[i]` counts the nodes
 that matched value `i`, so the values that were not found fall out directly:
 
@@ -473,7 +476,9 @@ viewer.isolate(sortedDifference(fab, heavy));  // the lighter ones
 
 Matching rules:
 
-- Values are compared as trimmed text, ignoring case; `caseSensitive: true` turns case on.
+- Values are compared as trimmed text, ignoring case; `caseSensitive: true` turns case on. A
+  `matches` string is compiled with the `i` flag unless `caseSensitive`; a `RegExp` keeps its own
+  flags. An invalid pattern throws a `SyntaxError`.
 - Numbers are matched by their text: `{ equals: 12 }` finds the stored value `12` or `'12'`.
 - Node names are indexed under the key `name`: `{ key: 'name', startsWith: 'Pump' }`.
 - Nested objects become dotted keys (`{ Pipe: { DN: 50 } }` is searched as `Pipe.DN`); every element
@@ -620,7 +625,8 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - **Search** opens the search panel, a search over the property index (`viewer.findObjects`): pick
   a key (the keys of all loaded models, plus `name` for node names) and a mode: **equals**, **list**
   (paste one value per line, e.g. thousands of spool names from a spreadsheet; Ctrl+Enter runs it),
-  **starts with** or **range** (min / max). **Find** (or Enter) reports "N of M values found, K
+  **starts with**, **regex** (a JavaScript regular expression, case-insensitive, unanchored: `^` and
+  `$` pin it to the whole value) or **range** (min / max). **Find** (or Enter) reports "N of M values found, K
   objects" for a list, with the values that were not found in a collapsible list and a **Copy
   missing** button (one per line), or "K objects in N nodes" otherwise. **Select**, **Isolate**,
   **Fit**, **Colour** (with a colour picker) and **Clear colour** act on the result.

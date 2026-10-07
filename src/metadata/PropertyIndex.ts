@@ -138,6 +138,10 @@ export class PropertyIndexImpl implements PropertyIndex {
       for (let i = lowerBound(col.lowers, low); i < V && col.lowers[i].startsWith(low); i++) {
         if (!cs || col.values[i].startsWith(text)) mask[i] = 1;
       }
+    } else if (q.matches !== undefined) {
+      // the dictionary holds the distinct values only, so a linear test over it stays cheap
+      const re = compilePattern(q.matches, cs);
+      for (let i = 0; i < V; i++) if (re.test(col.values[i])) mask[i] = 1;
     } else if (q.min !== undefined || q.max !== undefined) {
       const ord = (col.numOrder ??= numericOrder(col));
       // a NaN bound (e.g. Number('') from an empty field) counts as absent
@@ -520,4 +524,14 @@ function sortIfNeededI32(a: Int32Array): Int32Array {
 
 function now(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+/**
+ * The `matches` pattern as a RegExp without `g` / `y` (whose lastIndex would make `test` stateful);
+ * a string gets the `i` flag unless the query is case-sensitive.
+ */
+function compilePattern(pattern: string | RegExp, caseSensitive: boolean): RegExp {
+  if (typeof pattern === 'string') return new RegExp(pattern, caseSensitive ? '' : 'i');
+  const flags = pattern.flags.replace(/[gy]/g, '');
+  return flags === pattern.flags && !pattern.global && !pattern.sticky ? pattern : new RegExp(pattern.source, flags);
 }
