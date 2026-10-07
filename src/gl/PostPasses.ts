@@ -1,13 +1,14 @@
 /**
  * Fullscreen passes: present (1:1 copy of the colour target), composite (present + selection
- * overlay, optionally the edge display), background gradient and selection outline. Each draw binds
+ * overlay, optionally the edge display), selection x-ray edges, background gradient and selection
+ * outline. Each draw binds
  * its program, textures (units 0..4) and an empty VAO, then draws one triangle. Framebuffer, viewport, blending and depth state are set by the caller (see recipes in
  * the method docs).
  */
 import type { GlContext, GlResource } from './GlContext';
 import { Program } from './Program';
 import { FULLSCREEN_VS } from './shaders/common';
-import { BACKGROUND_FS, COMPOSITE_FS, OUTLINE_FS, PRESENT_FS, compositeFragmentSource } from './shaders/post';
+import { BACKGROUND_FS, COMPOSITE_FS, OUTLINE_FS, PRESENT_FS, XRAY_EDGES_FS, compositeFragmentSource } from './shaders/post';
 
 /** Selection / hover overlay settings of `drawComposite`. */
 export interface OverlayStyle {
@@ -43,6 +44,8 @@ export class PostPasses implements GlResource {
   readonly composite: Program;
   /** Composite with the edge display, compiled on first use. */
   private compositeEdges: Program | null = null;
+  /** Selection x-ray edges, compiled on first use. */
+  private xrayEdges: Program | null = null;
   readonly background: Program;
   readonly outline: Program;
   private vao: WebGLVertexArrayObject;
@@ -131,6 +134,38 @@ export class PostPasses implements GlResource {
     this.drawFullscreen();
   }
 
+  /** Compiles the selection x-ray program ahead of its first use (outside the frame loop). */
+  prepareXray(): void {
+    if (this.xrayEdges) return;
+    const p = new Program(this.ctx, FULLSCREEN_VS, XRAY_EDGES_FS, 'xray-edges');
+    p.setSampler('u_idTex', 0);
+    p.setSampler('u_depthTex', 3);
+    p.setSampler('u_normalTex', 4);
+    this.xrayEdges = p;
+  }
+
+  /**
+   * Selection x-ray: the edge display of a target that holds only the selected fragments (see
+   * XRAY_EDGES_FS), drawn over the presented image. `edges` describes that target (its depth and
+   * normal textures, the camera it was rendered with); `idTex` is its id attachment. Recipe: after
+   * drawComposite / drawPresent, same framebuffer, blend on with SRC_ALPHA / ONE_MINUS_SRC_ALPHA,
+   * depth test off. Uses texture units 0, 3 and 4.
+   */
+  drawXrayEdges(idTex: WebGLTexture, edges: EdgeStyle, offsetX = 0, offsetY = 0): void {
+    this.prepareXray();
+    const p = this.xrayEdges!.use();
+    const c = edges.color;
+    p.setVec4('u_edgeColor', c[0], c[1], c[2], c[3] ?? 1);
+    p.setVec4('u_edgeParams', edges.cosAngle, edges.near, edges.far, edges.orthographic ? 1 : 0);
+    p.setFloat('u_edgePixel', edges.pixelSize);
+    p.setIvec2('u_offset', offsetX, offsetY);
+    const st = this.ctx.state;
+    st.bindTexture(0, idTex);
+    st.bindTexture(3, edges.depthTex);
+    st.bindTexture(4, edges.normalTex);
+    this.drawFullscreen();
+  }
+
   /**
    * Vertical gradient, sRGB colours (top at the top of the viewport). Recipe: scene target bound,
    * `targets.setDrawBuffers('color')`, depth test off, depth write off, blend off.
@@ -177,6 +212,7 @@ export class PostPasses implements GlResource {
     this.present.dispose();
     this.composite.dispose();
     this.compositeEdges?.dispose();
+    this.xrayEdges?.dispose();
     this.background.dispose();
     this.outline.dispose();
     this.ctx.untrack(this);

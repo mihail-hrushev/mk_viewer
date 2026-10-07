@@ -335,8 +335,34 @@ new Viewer(canvas, { edges: true });              // or edges: { creaseAngle: 30
   the lines can cover much of the image.
 - Cost while on: a 2-byte-per-pixel render target (4 MB at 1920x1080) written by the scene passes,
   and about 0.2 ms more GPU time per presented frame at 1600x900 on an RTX 2000 Ada laptop GPU.
-  While off, nothing extra is allocated or run. `examples/models.html` has an Edges toolbar button
-  (`?edges=1` to start with it), `examples/stress.html` an edges checkbox.
+  While off, nothing extra is allocated or run. The built-in UI's Settings panel has a **Show
+  edges** switch; `examples/models.html?edges=1` starts with it on, `examples/stress.html` has an
+  edges checkbox.
+
+### Selection x-ray
+
+`setSelectionXray` draws the edges of the selected objects on top of everything, so a selection
+stays visible through the walls, floors and equipment in front of it. The lines are found the same
+way as the edge display, on a second image that holds only the selected objects: their silhouettes,
+creases and boundaries, hidden parts included. Default off, and independent of `setEdges`.
+
+```ts
+viewer.setSelectionXray(true);                                           // defaults
+viewer.setSelectionXray(true, { color: [1, 0.62, 0.1], opacity: 1, creaseAngle: 20 });
+viewer.setSelectionXray(false);
+viewer.getSelectionXray();                        // { color, opacity, creaseAngle } | null
+new Viewer(canvas, { selectionXray: true });      // or selectionXray: { color: [0, 1, 0] }
+```
+
+- Same options as `setEdges`; the default colour is the selection outline colour (orange), the
+  default opacity 1.
+- The selection tint and outline stay as they are; the x-ray lines are drawn over them.
+- Cost while on and something is selected: a depth + id + normal target of its own (10 bytes per
+  pixel, 20 MB at 1920x1080) and, whenever the view or the selection changes, one pass over the
+  draw items that hold selected objects (a merged batch is drawn whole, its other objects are
+  dropped in the vertex shader), plus one fullscreen pass when presenting. With nothing selected,
+  or while off, nothing extra runs; switching it off frees the target. The built-in UI's Settings
+  panel has a **Selected x-ray** switch; `examples/models.html?xray=1` starts with it on.
 
 ### Stats
 
@@ -635,7 +661,7 @@ should still use a viewport meta tag and keep its own controls finger-sized (see
 ## Built-in toolbar and model tree
 
 The viewer itself draws no UI. `createViewerUi` adds an optional overlay on the canvas: a toolbar at
-the bottom centre and the panels it opens (model tree, models, properties).
+the bottom centre and the panels it opens (model tree, models, properties, search, settings).
 
 ```ts
 import { Viewer, createViewerUi, gltfLoader } from 'mk-viewer';
@@ -669,6 +695,11 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   **Fit**, **Colour** (with a colour picker) and **Clear colour** act on the result.
   `ui.search.find(query)` runs a search from code and shows it in the panel; `ui.search.resultIds`
   is the last result.
+- **Settings** opens the settings panel: switches for **Show edges** (`setEdges`) and **Selected
+  x-ray** (`setSelectionXray`). A switch turned off and on again keeps the options the setting had.
+  The rows re-read their state when the panel opens, so settings changed from code show right.
+  `ui.settings.addToggle({ label, title, get, set })` adds a switch for a setting of your own and
+  returns a function that removes it; `ui.settings.refresh()` re-reads every row.
 - All panels are `.mkv-panel` windows: drag the header to move them, and the grip in the footer's
   corner to resize them; they stay inside the canvas. `new Panel(ui.element, { title, dock, height,
   resizable })` creates more of them for your own content.

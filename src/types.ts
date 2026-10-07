@@ -77,6 +77,11 @@ export interface ViewerOptions {
   /** Edge display from the start: `true` for the defaults, or its options (see `setEdges`). Default off. */
   edges?: boolean | EdgeOptions;
   /**
+   * Selection x-ray from the start: `true` for the defaults, or its options (see
+   * `setSelectionXray`). Default off.
+   */
+  selectionXray?: boolean | EdgeOptions;
+  /**
    * Viewer plugins (tools, overlays, UI additions; see docs/PLUGIN_API.md), installed in this
    * order at the end of construction. Not to be confused with `loaders` (file format plugins).
    * When one fails to install, the viewer is disposed and the constructor throws.
@@ -620,6 +625,18 @@ export interface ViewerApi {
   setEdges(enabled: boolean, options?: EdgeOptions): void;
   /** The active edge display settings, or null when edges are off. */
   getEdges(): EdgeInfo | null;
+  /**
+   * Selection x-ray: the edges of the selected objects drawn on top of everything, so a selection
+   * stays visible through whatever is in front of it. The lines are found like the edge display
+   * (`setEdges`, same options) on a second image that holds only the selected objects, so they
+   * follow their silhouettes, creases and boundaries, including the hidden parts. Independent of
+   * the edge display. Costs a depth + id + normal target of its own and a pass over the draw items
+   * that hold selected objects whenever the view or the selection changes. Defaults: the selection
+   * outline colour `[1, 0.62, 0.1]`, opacity 1, crease angle 20. Default off.
+   */
+  setSelectionXray(enabled: boolean, options?: EdgeOptions): void;
+  /** The active selection x-ray settings, or null when it is off. */
+  getSelectionXray(): EdgeInfo | null;
 
   // --- tools and plugins ---
   /**

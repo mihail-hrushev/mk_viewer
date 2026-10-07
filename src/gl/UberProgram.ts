@@ -51,7 +51,7 @@ export const DEFAULT_LIGHTING: LightingParams = {
   contrast: 1,
 };
 
-export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost';
+export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost' | 'selectedId';
 
 export class UberProgram {
   readonly program: Program;
@@ -227,6 +227,8 @@ export class UberProgram {
    *  - transparent:   visible, not ghosted, transparent materials; premultiplied colour, no id
    *  - transparentId: same fragments as transparent, writes ids (draw with drawBuffers 'id')
    *  - ghost:         visible + ghosted, any material; faint colour, no id
+   *  - selectedId:    visible + selected, not ghosted, any material; writes ids (the selection x-ray
+   *                   pass: draw with drawBuffers 'id' into a target of its own)
    * `materialFilter` false skips the per-vertex material opacity test (use when draw items are
    * already split into opaque / transparent).
    */
@@ -259,6 +261,11 @@ export class UberProgram {
         kind = PassKind.Ghost;
         value = V | G;
         break;
+      case 'selectedId':
+        mask = V | G | FragFlags.Selected;
+        value = V | FragFlags.Selected;
+        writeId = 1;
+        break;
     }
     gl.uniform1i(this.uPassKind, kind);
     gl.uniform1i(this.uMaterialFilter, materialFilter ? filter : MaterialFilter.Any);
@@ -285,6 +292,7 @@ export class UberProgram {
  *  - transparent:   depth test LEQUAL, no depth write, blend ONE / ONE_MINUS_SRC_ALPHA, drawBuffers color
  *  - transparentId: depth test LEQUAL, depth write, no blend, drawBuffers id (+ normals)
  *  - ghost:         same as transparent
+ *  - selectedId:    depth test LESS, depth write, no blend, drawBuffers id (+ normals)
  */
 export function applyPassState(
   ctx: GlContext,
@@ -300,8 +308,8 @@ export function applyPassState(
     s.setDepthMask(true);
     s.setBlend(false);
     targets.setDrawBuffers('all');
-  } else if (pass === 'transparentId') {
-    s.setDepthFunc(gl.LEQUAL);
+  } else if (pass === 'transparentId' || pass === 'selectedId') {
+    s.setDepthFunc(pass === 'selectedId' ? gl.LESS : gl.LEQUAL);
     s.setDepthMask(true);
     s.setBlend(false);
     targets.setDrawBuffers('id');

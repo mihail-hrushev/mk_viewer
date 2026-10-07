@@ -238,6 +238,8 @@ export class Viewer implements ViewerApi {
 
   // edge display (null = off)
   private edgeInfo: EdgeInfo | null = null;
+  // selection x-ray (null = off)
+  private xrayInfo: EdgeInfo | null = null;
 
   // pointer / hover
   private hoverInFlight = false;
@@ -328,6 +330,7 @@ export class Viewer implements ViewerApi {
     this.resizeObserver?.observe(canvas);
     this.resize();
     if (options.edges) this.setEdges(true, options.edges === true ? {} : options.edges);
+    if (options.selectionXray) this.setSelectionXray(true, options.selectionXray === true ? {} : options.selectionXray);
     if (options.environment != null) {
       this.setEnvironment(options.environment, options.environmentOptions).catch((e) =>
         console.error('mk-viewer: the environment could not be loaded', e),
@@ -630,6 +633,7 @@ export class Viewer implements ViewerApi {
     this.scene.select(objectIds);
     this.selectionCount = objectIds.length;
     // selection tint + outline are composited at present time: no redraw of the scene
+    this.renderer.selectionChanged();
     this.renderer.invalidatePresent();
     this.emit('selection', this.scene.getSelection());
   }
@@ -1066,8 +1070,23 @@ export class Viewer implements ViewerApi {
   }
 
   getEdges(): EdgeInfo | null {
-    const e = this.edgeInfo;
-    return e ? { color: [e.color[0], e.color[1], e.color[2]], opacity: e.opacity, creaseAngle: e.creaseAngle } : null;
+    return copyEdgeInfo(this.edgeInfo);
+  }
+
+  setSelectionXray(enabled: boolean, options: EdgeOptions = {}): void {
+    if (this.disposed) return;
+    if (!enabled) {
+      this.xrayInfo = null;
+      this.renderer.setSelectionXray(null);
+      return;
+    }
+    const info = edgeOptions(options, XRAY_DEFAULT_COLOR, 1);
+    this.xrayInfo = info;
+    this.renderer.setSelectionXray(info);
+  }
+
+  getSelectionXray(): EdgeInfo | null {
+    return copyEdgeInfo(this.xrayInfo);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1730,10 +1749,17 @@ function environmentOptions(o: EnvironmentOptions): { intensity: number; rotatio
   return { intensity, rotation, keyLight };
 }
 
-function edgeOptions(o: EdgeOptions): EdgeInfo {
-  const c = o.color ?? [0.1, 0.1, 0.1];
+/** Default line colour of the selection x-ray: the selection outline colour. */
+const XRAY_DEFAULT_COLOR: [number, number, number] = [1, 0.62, 0.1];
+
+function copyEdgeInfo(e: EdgeInfo | null): EdgeInfo | null {
+  return e ? { color: [e.color[0], e.color[1], e.color[2]], opacity: e.opacity, creaseAngle: e.creaseAngle } : null;
+}
+
+function edgeOptions(o: EdgeOptions, defaultColor: ArrayLike<number> = [0.1, 0.1, 0.1], defaultOpacity = 0.75): EdgeInfo {
+  const c = o.color ?? defaultColor;
   const color: [number, number, number] = [+c[0], +c[1], +c[2]];
-  const opacity = o.opacity ?? 0.75;
+  const opacity = o.opacity ?? defaultOpacity;
   const creaseAngle = o.creaseAngle ?? 20;
   if (!color.every((v) => v >= 0 && v <= 1)) throw new RangeError(`mk-viewer: edge color components must be in 0..1, got ${color}`);
   if (!(opacity >= 0 && opacity <= 1)) throw new RangeError(`mk-viewer: edge opacity must be in 0..1, got ${opacity}`);

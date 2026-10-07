@@ -340,6 +340,16 @@ export class Scene {
     return Array.from(this.selection.subarray(0, this.selectionCount));
   }
 
+  /** Calls fn(mesh) for every alive mesh of every selected object (no allocation). */
+  forEachSelectedFragment(fn: (mesh: number) => void): void {
+    const fr = this.fragments;
+    const sel = this.selection;
+    for (let i = 0; i < this.selectionCount; i++) {
+      const id = sel[i];
+      for (let f = fr.firstOfObject(id); f >= 0; f = fr.nextOfObject(f, id)) fn(f);
+    }
+  }
+
   /** Hover highlight of one object (null clears). */
   setHighlighted(objectId: number | null): void {
     const H = FragFlags.Highlighted;

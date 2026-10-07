@@ -8,6 +8,9 @@
  * the composite pass. It only exists while enabled (2 bytes per pixel); the 'all' and 'id' draw
  * buffer modes then include it.
  *
+ * A target without the colour attachment (`color: false`, e.g. the selection x-ray target, which
+ * only needs depth, ids and normals) never writes or clears colour: its 'all' mode is 'id'.
+ *
  * Nothing here clears implicitly: the target keeps its content across frames, which is what the
  * progressive renderer needs (clear only when restarting the image).
  */
@@ -29,6 +32,8 @@ export class RenderTargets implements GlResource {
   hasNormals = false;
   /** DEPTH_COMPONENT32F or DEPTH_COMPONENT24, whichever made the framebuffer complete. */
   depthFormat = 0;
+  /** The target has a colour attachment (constructor option `color`, default true). */
+  readonly hasColor: boolean;
 
   private drawMode: DrawBufferMode | null = null;
   private readonly buffersAll: number[];
@@ -43,8 +48,12 @@ export class RenderTargets implements GlResource {
   private readonly clearZero = new Float32Array(4);
   private readonly clearDepthValue = new Float32Array([1]);
 
-  constructor(private readonly ctx: GlContext) {
+  constructor(
+    private readonly ctx: GlContext,
+    options: { color?: boolean } = {},
+  ) {
     const gl = ctx.gl;
+    this.hasColor = options.color !== false;
     this.buffersAll = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     this.buffersColor = [gl.COLOR_ATTACHMENT0, gl.NONE];
     this.buffersId = [gl.NONE, gl.COLOR_ATTACHMENT1];
@@ -58,7 +67,7 @@ export class RenderTargets implements GlResource {
   }
 
   get byteSize(): number {
-    return this.width * this.height * (this.hasNormals ? 14 : 12);
+    return this.width * this.height * ((this.hasColor ? 12 : 8) + (this.hasNormals ? 2 : 0));
   }
 
   /**
@@ -99,6 +108,7 @@ export class RenderTargets implements GlResource {
    * 'all' and 'id' also write normals.
    */
   setDrawBuffers(mode: DrawBufferMode): void {
+    if (mode === 'all' && !this.hasColor) mode = 'id';
     if (this.drawMode === mode) return;
     this.drawMode = mode;
     const n = this.hasNormals;
@@ -126,7 +136,7 @@ export class RenderTargets implements GlResource {
     this.clearColor[1] = g;
     this.clearColor[2] = b;
     this.clearColor[3] = a;
-    gl.clearBufferfv(gl.COLOR, 0, this.clearColor);
+    if (this.hasColor) gl.clearBufferfv(gl.COLOR, 0, this.clearColor);
     gl.clearBufferfv(gl.COLOR, 1, this.clearZero);
     if (this.hasNormals) gl.clearBufferfv(gl.COLOR, 2, this.clearZero);
     gl.clearBufferfv(gl.DEPTH, 0, this.clearDepthValue);
@@ -220,7 +230,7 @@ export class RenderTargets implements GlResource {
     const gl = this.ctx.gl;
     const state = this.ctx.state;
     this.deleteTextures();
-    this.colorTex = this.makeTexture(gl.RGBA8);
+    if (this.hasColor) this.colorTex = this.makeTexture(gl.RGBA8);
     this.idTex = this.makeTexture(gl.RGBA8);
 
     state.bindFramebuffer(this.framebuffer);

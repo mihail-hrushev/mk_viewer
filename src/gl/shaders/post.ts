@@ -94,21 +94,10 @@ void main() {
 `);
 
 /**
- * Present with selection / hover overlay: copies the colour target 1:1 and, per pixel, looks up the
- * fragment under it in the id target and its flags in the fragment texture:
- *  - Selected fragments are tinted towards u_selectionColor, hovered (Highlighted) ones towards
- *    u_highlightColor (both linear rgb + amount, mixed in linear space);
- *  - pixels not selected but with a selected fragment at distance u_outlineWidth get the outline
- *    colour (u_outlineWidth 0 disables the outline search).
- * Selection / hover therefore never require re-rendering the scene: changing the flags only needs
- * the fragment texture row upload and one present. The id target holds pickable, non-ghosted
- * fragments only (transparent ones after the transparent-id pass), so only those are tinted.
- * Blend off. u_colorTex, u_idTex, u_fragTex (sampler2D), u_selectionColor, u_highlightColor (vec4),
- * u_outlineColor (vec4, sRGB rgb + alpha), u_outlineWidth (int px), u_offset (ivec2, as present),
- * u_overlay (int, 0: no tint and no outline, the flags are not looked up).
- *
- * EDGES variant (`compositeFragmentSource({ edges: true })`) also draws the edge display: lines
- * where neighbouring pixels of the target (+-1 px in x and y) differ in
+ * Edge detection over a scene target, shared by the EDGES variant of COMPOSITE_FS and by
+ * XRAY_EDGES_FS. The host shader declares `u_idTex` (sampler2D, fragment index + 1) and includes
+ * PACK_U32 first. Lines are found where neighbouring pixels of the target (+-1 px in x and y) differ
+ * in
  *  - face normal (u_normalTex, RG8 octahedral, written by the uber EDGES variant) by more than the
  *    crease angle; coplanar triangles share the normal, so diagonals of flat faces never show;
  *    a pair bridged by a face within the crease angle of both beside it (another neighbour of p or a
@@ -120,48 +109,18 @@ void main() {
  *    occlusion edges;
  *  - fragment id (u_idTex, both non-zero): touching, coplanar meshes.
  * A depth line goes on the nearer pixel, a crease / id line on a fixed side; the pixel across gets
- * EDGE_SOFT of it, which softens staircases (about 1 device pixel at any pixel ratio). Lines are
- * mixed in after the selection tint and before the selection outline.
- * u_depthTex, u_normalTex (sampler2D), u_edgeColor (vec4, sRGB rgb + opacity), u_edgeParams (vec4:
- * cos(crease angle), near, far, orthographic 0/1 of the image's camera), u_edgePixel (float: world
- * size of one pixel at view distance 1 (perspective) or anywhere (orthographic)).
+ * EDGE_SOFT of it, which softens staircases (about 1 device pixel at any pixel ratio).
+ * `edgeWeight(p, idAtP)` is the line weight 0..1 of target pixel p.
+ * u_depthTex, u_normalTex (sampler2D), u_edgeParams (vec4: cos(crease angle), near, far,
+ * orthographic 0/1 of the camera the target was rendered with), u_edgePixel (float: world size of
+ * one pixel at view distance 1 (perspective) or anywhere (orthographic)).
  */
-const COMPOSITE_BODY = /* glsl */ `
-${PRECISION}
-${LAYOUT_CONSTANTS}
-uniform highp sampler2D u_colorTex;
-uniform highp sampler2D u_idTex;
-uniform highp sampler2D u_fragTex;
-uniform vec4 u_selectionColor;
-uniform vec4 u_highlightColor;
-uniform vec4 u_outlineColor;
-uniform int u_outlineWidth;
-uniform ivec2 u_offset;
-uniform int u_overlay;
-#ifdef EDGES
+const EDGE_DETECT = /* glsl */ `
 uniform highp sampler2D u_depthTex;
 uniform highp sampler2D u_normalTex;
-uniform vec4 u_edgeColor;
 uniform vec4 u_edgeParams;
 uniform float u_edgePixel;
-#endif
-out vec4 o_color;
 
-${RECORD_ADDRESSING}
-${PACK_U32}
-${SRGB}
-
-uint flagsOf(uint id) {
-  if (id == 0u) return 0u;
-  return uint(texelFetch(u_fragTex, fragTexel0(id - 1u) + ivec2(4, 0), 0).w);
-}
-
-const ivec2 DIRS[8] = ivec2[8](
-  ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
-  ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1)
-);
-
-#ifdef EDGES
 ${OCT_DECODE}
 
 const float EDGE_SOFT = 0.35;
@@ -288,6 +247,60 @@ float edgeWeight(ivec2 p, uint idc) {
   w = max(w, edgeTo(p, ivec2(0, -1), maxp, lc, idc, my, py, crease.w));
   return w;
 }
+`;
+
+/**
+ * Present with selection / hover overlay: copies the colour target 1:1 and, per pixel, looks up the
+ * fragment under it in the id target and its flags in the fragment texture:
+ *  - Selected fragments are tinted towards u_selectionColor, hovered (Highlighted) ones towards
+ *    u_highlightColor (both linear rgb + amount, mixed in linear space);
+ *  - pixels not selected but with a selected fragment at distance u_outlineWidth get the outline
+ *    colour (u_outlineWidth 0 disables the outline search).
+ * Selection / hover therefore never require re-rendering the scene: changing the flags only needs
+ * the fragment texture row upload and one present. The id target holds pickable, non-ghosted
+ * fragments only (transparent ones after the transparent-id pass), so only those are tinted.
+ * Blend off. u_colorTex, u_idTex, u_fragTex (sampler2D), u_selectionColor, u_highlightColor (vec4),
+ * u_outlineColor (vec4, sRGB rgb + alpha), u_outlineWidth (int px), u_offset (ivec2, as present),
+ * u_overlay (int, 0: no tint and no outline, the flags are not looked up).
+ *
+ * EDGES variant (`compositeFragmentSource({ edges: true })`) also draws the edge display: the lines
+ * of EDGE_DETECT over the scene target (depth, normals, ids of the image's camera), mixed in after
+ * the selection tint and before the selection outline. u_edgeColor (vec4, sRGB rgb + opacity) plus
+ * the EDGE_DETECT uniforms.
+ */
+const COMPOSITE_BODY = /* glsl */ `
+${PRECISION}
+${LAYOUT_CONSTANTS}
+uniform highp sampler2D u_colorTex;
+uniform highp sampler2D u_idTex;
+uniform highp sampler2D u_fragTex;
+uniform vec4 u_selectionColor;
+uniform vec4 u_highlightColor;
+uniform vec4 u_outlineColor;
+uniform int u_outlineWidth;
+uniform ivec2 u_offset;
+uniform int u_overlay;
+#ifdef EDGES
+uniform vec4 u_edgeColor;
+#endif
+out vec4 o_color;
+
+${RECORD_ADDRESSING}
+${PACK_U32}
+${SRGB}
+
+uint flagsOf(uint id) {
+  if (id == 0u) return 0u;
+  return uint(texelFetch(u_fragTex, fragTexel0(id - 1u) + ivec2(4, 0), 0).w);
+}
+
+const ivec2 DIRS[8] = ivec2[8](
+  ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+  ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1)
+);
+
+#ifdef EDGES
+${EDGE_DETECT}
 #endif
 
 void main() {
@@ -340,6 +353,34 @@ export function compositeFragmentSource(options: { edges?: boolean } = {}): stri
 }
 
 export const COMPOSITE_FS = compositeFragmentSource();
+
+/**
+ * Selection x-ray: the edge display (EDGE_DETECT) of a second scene target holding only the selected
+ * fragments (Renderer's x-ray pass: their depth, face normals and ids, everything else cleared),
+ * drawn over the presented image so that the edges of the selection show through whatever is in
+ * front of it. Pixels without a line are discarded; the rest get the line colour with the weight as
+ * alpha. Recipe: after composite / present, same framebuffer (canvas), blend on with SRC_ALPHA /
+ * ONE_MINUS_SRC_ALPHA, depth test off.
+ * u_idTex (sampler2D, the x-ray target's ids), u_edgeColor (vec4, sRGB rgb + opacity), u_offset
+ * (ivec2, as present) and the EDGE_DETECT uniforms (of the x-ray target).
+ */
+export const XRAY_EDGES_FS = assembleShader(/* glsl */ `
+${PRECISION}
+uniform highp sampler2D u_idTex;
+uniform vec4 u_edgeColor;
+uniform ivec2 u_offset;
+out vec4 o_color;
+
+${PACK_U32}
+${EDGE_DETECT}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) + u_offset;
+  float w = edgeWeight(p, unpackU32(texelFetch(u_idTex, p, 0)));
+  if (w <= 0.0) discard;
+  o_color = vec4(u_edgeColor.rgb, w * u_edgeColor.a);
+}
+`);
 
 /**
  * Pick resolve: copies a small rectangle of the id target and the depth texture into two RGBA8

@@ -1,6 +1,6 @@
 /**
  * Optional built-in UI drawn over the viewer canvas: a toolbar at the bottom centre, the movable
- * panels it opens (model tree, models, properties, search), and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
+ * panels it opens (model tree, models, properties, search, settings), and a right-click menu. Plain DOM, no dependencies; the viewer itself works without it.
  *
  *   const ui = createViewerUi(viewer);
  *   ui.addButton({ label: 'Section', title: 'Toggle section plane', onClick: () => ... });
@@ -14,6 +14,7 @@ import { HierarchyPanel } from './HierarchyPanel';
 import { ModelsPanel } from './ModelsPanel';
 import { PropertiesPanel } from './PropertiesPanel';
 import { SearchPanel } from './SearchPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { ensureStyles } from './styles';
 
 export interface ToolbarButton {
@@ -46,6 +47,11 @@ export interface ViewerUi {
    * selected, isolated, framed or coloured; `ui.search.find(query)` runs one from code.
    */
   readonly search: SearchPanel;
+  /**
+   * Settings panel: switches for viewer settings (Show edges, Selected x-ray);
+   * `ui.settings.addToggle(...)` adds rows for your own.
+   */
+  readonly settings: SettingsPanel;
   /**
    * Draws the canvas context menu (`contextMenu` requests of the viewer) and adds its own entries
    * Hide selected, Hide unselected and Show all (order -100).
@@ -173,6 +179,16 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       viewer.showAll();
     },
   });
+  let settingsButton: HTMLButtonElement | null = null;
+  const settings = new SettingsPanel(viewer, overlay, (open) => settingsButton?.classList.toggle('mkv-on', open));
+  settingsButton = addButton({
+    label: 'Settings',
+    title: 'Viewer settings: edges, selected x-ray',
+    onClick: () => {
+      settings.toggle();
+      return settings.isOpen;
+    },
+  });
 
   const menu = new ContextMenu(viewer, overlay);
   const hasSelection = (sel: number[]): boolean => sel.length > 0;
@@ -227,6 +243,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
     models,
     properties,
     search,
+    settings,
     menu,
     addButton,
     addToggle,
@@ -239,6 +256,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
       win?.removeEventListener('resize', place);
       win?.removeEventListener('scroll', place, true);
       menu.dispose();
+      settings.dispose();
       search.dispose();
       properties.dispose();
       models.dispose();

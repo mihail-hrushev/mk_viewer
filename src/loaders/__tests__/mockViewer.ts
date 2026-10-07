@@ -249,6 +249,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     getEnvironment: () => null,
     setEdges: () => {},
     getEdges: () => null,
+    setSelectionXray: () => {},
+    getSelectionXray: () => null,
     on: () => () => {},
     resize() {},
     invalidate() {},

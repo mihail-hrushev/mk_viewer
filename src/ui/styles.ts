@@ -35,6 +35,14 @@ const CSS = `
 .mkv-btn.mkv-outline:hover{background:#3c4043}
 .mkv-model-item{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-top:1px solid #3c4043}
 .mkv-panel input[type=checkbox]{width:18px;height:18px;margin:0}
+.mkv-settings{display:flex;flex-direction:column}
+.mkv-switch{display:flex;align-items:center;gap:10px;min-height:36px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.mkv-panel .mkv-switch input{appearance:none;-webkit-appearance:none;flex:0 0 36px;width:36px;height:20px;margin:0;position:relative;border-radius:10px;
+  background:#5f6368;cursor:pointer;transition:background .15s}
+.mkv-panel .mkv-switch input::before{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#e8eaed;transition:left .15s}
+.mkv-panel .mkv-switch input:checked{background:#1a73e8}
+.mkv-panel .mkv-switch input:checked::before{left:18px}
+.mkv-panel .mkv-switch input:focus-visible{outline:2px solid #8ab4f8;outline-offset:2px}
 .mkv-panel progress{flex:1;min-width:60px}
 .mkv-errors{color:#ff8a80;white-space:pre-wrap}
 .mkv-errors:empty,.mkv-footer:empty{display:none}

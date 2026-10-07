@@ -29,7 +29,9 @@
  *  - present only (`invalidatePresent()`): selection / hover flags. They are a screen-space overlay
  *    (tint + outline from the id target and the fragment flags, COMPOSITE_FS) composited when the
  *    accumulated image is presented, so a flag change costs the fragment texture row upload and one
- *    fullscreen pass; the accumulated image is neither cleared nor redrawn.
+ *    fullscreen pass; the accumulated image is neither cleared nor redrawn. The selection x-ray
+ *    (`setSelectionXray`) adds a pass into a target of its own before presenting (`drawXray`): the
+ *    selected fragments alone, redrawn when the image, the selection or the batching changes.
  *  - append (`noteAppend()`, i.e. addMesh/addMeshes only): re-traverse and draw the new items into
  *    the existing image, unless the image already holds blended content or items were re-batched by
  *    compaction since the image started (stamps unreliable), in which case it restarts.
@@ -270,6 +272,31 @@ export class Renderer {
     normalTex: null,
   };
 
+  // selection x-ray (null = off): the edges of the selected fragments over everything, found on a
+  // target holding only them (depth, ids, normals; no colour), see drawXray
+  private xray: RenderEdgeOptions | null = null;
+  private xrayTargets: RenderTargets | null = null;
+  private readonly xrayStyle: EdgeStyle = {
+    color: new Float32Array(4),
+    cosAngle: 0,
+    near: 0,
+    far: 1,
+    orthographic: false,
+    pixelSize: 0,
+    depthTex: null,
+    normalTex: null,
+  };
+  /** Image the x-ray target holds, and whether it must be redrawn for other reasons. */
+  private xrayImage = 0;
+  private xrayDirty = true;
+  /** Draw items holding a selected fragment, collected at batching version `xrayStructure`. */
+  private xrayItems = new Int32Array(64);
+  private xrayItemCount = 0;
+  private xrayItemsStale = true;
+  private xrayStructure = -1;
+  private xrayMark = new Uint32Array(0);
+  private xrayMarkGen = 0;
+
   // image-based lighting
   private readonly envTex: EnvironmentTexture;
   private envUniforms: EnvironmentUniforms | null = null;
@@ -421,14 +448,53 @@ export class Renderer {
     }
   }
 
+  /**
+   * Selection x-ray: the edges of the selected fragments drawn over the presented image, through
+   * whatever is in front of them (`drawXray`), or null for off. Changing the options only
+   * re-presents; switching it off frees its target.
+   */
+  setSelectionXray(options: RenderEdgeOptions | null): void {
+    this.xray = options;
+    if (options) {
+      const c = this.xrayStyle.color as Float32Array;
+      c[0] = options.color[0];
+      c[1] = options.color[1];
+      c[2] = options.color[2];
+      c[3] = options.opacity;
+      this.xrayStyle.cosAngle = Math.cos((options.creaseAngle * Math.PI) / 180);
+      this.post.prepareXray();
+      this.ensurePrograms();
+    } else if (this.xrayTargets) {
+      this.xrayTargets.dispose();
+      this.xrayTargets = null;
+      this.xrayDirty = true;
+    }
+    this.invalidatePresent();
+  }
+
+  /** The selection changed (the x-ray target, if any, is stale). */
+  selectionChanged(): void {
+    this.xrayDirty = true;
+    this.xrayItemsStale = true;
+  }
+
   /** Variant key of the current settings (see `variants`). */
   private variantKey(): number {
     return (this.sectionCount > 0 ? 1 : 0) | (this.envUniforms ? 2 : 0) | (this.edges ? 4 : 0);
   }
 
-  /** Compiles the program variant the current settings need (outside the frame loop). */
+  /** Variant of the x-ray pass: face normals and the section planes; no lighting (no colour output). */
+  private xrayKey(): number {
+    return (this.sectionCount > 0 ? 1 : 0) | 4;
+  }
+
+  /** Compiles the program variants the current settings need (outside the frame loop). */
   private ensurePrograms(): void {
-    const k = this.variantKey();
+    this.ensureProgram(this.variantKey());
+    if (this.xray) this.ensureProgram(this.xrayKey());
+  }
+
+  private ensureProgram(k: number): void {
     if (this.variants[k]) return;
     const v = new UberProgram(this.ctx, { sectionPlanes: (k & 1) !== 0, environment: (k & 2) !== 0, edges: (k & 4) !== 0 });
     if (k & 2) v.setEnvironment(this.envUniforms);
@@ -483,6 +549,7 @@ export class Renderer {
     this.gpu.dispose();
     for (const v of this.variants) v?.dispose();
     this.targets.dispose();
+    this.xrayTargets?.dispose();
     this.post.dispose();
     this.reader.dispose();
     this.timer.dispose();
@@ -1153,12 +1220,14 @@ export class Renderer {
     const s = this.ctx.state;
     this.presentPending = false;
     this.presentCount++;
+    const t = this.targets;
+    const sel = this.host.selectionCount > 0;
+    const xray = sel && this.xray !== null;
+    if (xray) this.drawXray(); // into its own target, before the canvas is bound
     s.bindFramebuffer(null);
     s.setViewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     s.setDepthTest(false);
     s.setBlend(false);
-    const t = this.targets;
-    const sel = this.host.selectionCount > 0;
     const edges = this.edges !== null && t.normalTex !== null;
     if (sel || this.host.highlightActive || edges) {
       // outline width is in target pixels: scale with the device pixel ratio
@@ -1181,5 +1250,117 @@ export class Renderer {
     } else {
       this.post.drawPresent(t.colorTex!);
     }
+    if (xray) {
+      // the lines of the x-ray target over everything; its camera is the image's (edgeStyle)
+      const xt = this.xrayTargets!;
+      const xs = this.xrayStyle;
+      const es = this.edgeStyle;
+      xs.near = es.near;
+      xs.far = es.far;
+      xs.orthographic = es.orthographic;
+      xs.pixelSize = es.pixelSize;
+      xs.depthTex = xt.depthTex;
+      xs.normalTex = xt.normalTex;
+      s.setBlend(true);
+      s.setBlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.post.drawXrayEdges(xt.idTex!, xs);
+      s.setBlend(false);
+    }
   }
+
+  /**
+   * Selection x-ray pass: the selected fragments alone (depth, ids, face normals; no colour) into
+   * the x-ray target, with the image's camera, independent of the progressive image. Only the draw
+   * items holding a selected fragment are submitted, in full (the vertex shader drops the other
+   * fragments of an item), so the cost follows the selection rather than the scene. Nothing is
+   * drawn while the target is current: same image, selection and batching.
+   */
+  private drawXray(): void {
+    const scene = this.scene;
+    const structure = scene.batcher.structureVersion;
+    let t = this.xrayTargets;
+    if (!t) {
+      t = this.xrayTargets = new RenderTargets(this.ctx, { color: false });
+      t.setNormals(true);
+      this.xrayDirty = true;
+    }
+    if (t.resize(this.targets.width, this.targets.height)) this.xrayDirty = true;
+    if (!this.xrayDirty && this.xrayImage === this.imageId && this.xrayStructure === structure) return;
+    this.xrayDirty = false;
+    this.xrayImage = this.imageId;
+    if (this.xrayItemsStale || this.xrayStructure !== structure) this.collectXrayItems();
+    this.xrayStructure = structure;
+
+    t.clear(); // binds it: ids, normals and depth cleared
+    const k = this.xrayKey();
+    this.ensureProgram(k);
+    const prog = this.variants[k]!;
+    if (prog !== this.prog) {
+      const cam = this.camera; // unchanged since the image started (a change restarts the image)
+      prog.setCamera(cam.view, cam.projection, cam.orthographic);
+      if (prog.hasSectionPlanes) prog.setSectionPlanes(this.sectionView, this.sectionCount);
+    }
+    this.gpu.fragTex.bind(UBER_FRAG_TEX_UNIT);
+    this.gpu.matTex.bind(UBER_MAT_TEX_UNIT);
+    applyPassState(this.ctx, t, 'selectedId');
+    prog.setPass('selectedId', false);
+
+    // the pass is not part of the scene statistics
+    const sub = this.submitter;
+    const drawCalls = sub.drawCalls;
+    const indices = sub.indicesDrawn;
+    const instances = sub.instancesDrawn;
+    const items = scene.items;
+    let cur: VaoSlot | null = null;
+    sub.discard();
+    for (let i = 0; i < this.xrayItemCount; i++) {
+      const it = this.xrayItems[i];
+      const kind = items.kind[it];
+      if (kind === ITEM_FREE) continue;
+      if (kind === ITEM_INSTANCED) {
+        sub.flush();
+        cur = null;
+        const slot = this.gpu.instancedSlot(items.page[it], items.instancePage[it]);
+        if (slot) sub.drawInstanced(slot.vao, items.firstIndex[it], items.indexCount[it], items.firstInstance[it], items.instanceCount[it]);
+      } else {
+        const slot = this.gpu.mergedSlot(items.page[it]);
+        if (!slot) continue;
+        if (slot !== cur) {
+          sub.flush();
+          slot.vao.bind();
+          cur = slot;
+        }
+        sub.push(items.firstIndex[it], items.indexCount[it]);
+      }
+    }
+    sub.flush();
+    sub.drawCalls = drawCalls;
+    sub.indicesDrawn = indices;
+    sub.instancesDrawn = instances;
+  }
+
+  /** Collects the draw items holding a selected fragment, each once (`xrayItems`). */
+  private collectXrayItems(): void {
+    const cap = this.scene.items.capacity;
+    if (this.xrayMark.length < cap) {
+      this.xrayMark = new Uint32Array(cap);
+      this.xrayMarkGen = 0;
+    }
+    this.xrayMarkGen++;
+    this.xrayItemCount = 0;
+    this.scene.forEachSelectedFragment(this.collectXrayItem);
+    this.xrayItemsStale = false;
+  }
+
+  private readonly collectXrayItem = (f: number): void => {
+    const it = this.scene.fragments.item[f];
+    if (it < 0 || this.xrayMark[it] === this.xrayMarkGen) return; // not batched yet, or seen
+    this.xrayMark[it] = this.xrayMarkGen;
+    if (this.xrayItemCount === this.xrayItems.length) {
+      const a = new Int32Array(this.xrayItems.length * 2);
+      a.set(this.xrayItems);
+      this.xrayItems = a;
+    }
+    this.xrayItems[this.xrayItemCount++] = it;
+  };
 }

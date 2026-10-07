@@ -14,8 +14,8 @@
  *
  * URL parameters: url=<comma-separated URLs>, offset=<x shift between URL models, default 0>,
  * up=y|z (scene up axis, default z), env=studio|<URL of a Radiance .hdr> (image-based lighting; a
- * .hdr file can also be opened or dropped like a model), edges=1 (edge display on; the toolbar
- * button "Edges" switches it).
+ * .hdr file can also be opened or dropped like a model), edges=1 (edge display on) and xray=1
+ * (selection x-ray on); both are switches of the Settings panel.
  */
 import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
@@ -30,19 +30,12 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
 });
-// built-in UI: bottom toolbar, movable Tree and Models panels, right-click menu
+// built-in UI: bottom toolbar, movable panels (Tree, Models, Properties, Search, Settings), right-click menu
 const ui = createViewerUi(viewer);
 // "display edges": dark lines along creases, silhouettes and mesh boundaries (not triangle diagonals)
-const edges = ui.addToggle({
-  label: 'Edges',
-  title: 'Show edges',
-  onClick: () => {
-    viewer.setEdges(!viewer.getEdges());
-    edges.on = viewer.getEdges() !== null;
-  },
-});
 if (params.get('edges') === '1') viewer.setEdges(true);
-edges.on = viewer.getEdges() !== null;
+// selection x-ray: the edges of the selected objects on top of everything
+if (params.get('xray') === '1') viewer.setSelectionXray(true);
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!; // the plugin's own API
 ui.models.open();
 
