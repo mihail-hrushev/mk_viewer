@@ -60,6 +60,7 @@ const uint FLAG_SELECTED = ${FragFlags.Selected}u;
 const uint FLAG_GHOSTED = ${FragFlags.Ghosted}u;
 const uint FLAG_HIGHLIGHTED = ${FragFlags.Highlighted}u;
 const uint FLAG_NOT_PICKABLE = ${FragFlags.NotPickable}u;
+const uint FLAG_HIDDEN = ${FragFlags.Hidden}u;
 const int MAX_SECTION_PLANES = ${MAX_SECTION_PLANES};
 `;
 

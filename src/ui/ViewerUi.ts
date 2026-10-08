@@ -48,7 +48,7 @@ export interface ViewerUi {
    */
   readonly search: SearchPanel;
   /**
-   * Settings panel: switches for viewer settings (Show edges, Selected x-ray);
+   * Settings panel: switches for viewer settings (Show edges, Selected x-ray, Ghost hidden);
    * `ui.settings.addToggle(...)` adds rows for your own.
    */
   readonly settings: SettingsPanel;
@@ -183,7 +183,7 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
   const settings = new SettingsPanel(viewer, overlay, (open) => settingsButton?.classList.toggle('mkv-on', open));
   settingsButton = addButton({
     label: 'Settings',
-    title: 'Viewer settings: edges, selected x-ray',
+    title: 'Viewer settings: edges, selected x-ray, ghost hidden',
     onClick: () => {
       settings.toggle();
       return settings.isOpen;

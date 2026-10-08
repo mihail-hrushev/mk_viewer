@@ -14,8 +14,9 @@
  *
  * URL parameters: url=<comma-separated URLs>, offset=<x shift between URL models, default 0>,
  * up=y|z (scene up axis, default z), env=studio|<URL of a Radiance .hdr> (image-based lighting; a
- * .hdr file can also be opened or dropped like a model), edges=1 (edge display on) and xray=1
- * (selection x-ray on); both are switches of the Settings panel.
+ * .hdr file can also be opened or dropped like a model), edges=1 (edge display on), xray=1
+ * (selection x-ray on) and ghost=1 (hidden objects shown faintly); all three are switches of the
+ * Settings panel.
  */
 import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
@@ -36,6 +37,8 @@ const ui = createViewerUi(viewer);
 if (params.get('edges') === '1') viewer.setEdges(true);
 // selection x-ray: the edges of the selected objects on top of everything
 if (params.get('xray') === '1') viewer.setSelectionXray(true);
+// ghost hidden: objects hidden with setVisible / isolate(ids, true) drawn faintly instead of not at all
+if (params.get('ghost') === '1') viewer.setGhostHidden(true);
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!; // the plugin's own API
 ui.models.open();
 

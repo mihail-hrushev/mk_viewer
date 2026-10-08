@@ -310,7 +310,7 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - `ui.element` is the UI overlay; `new Panel(ui.element, { title })` makes a movable, resizable
   panel (`resizable: false` drops the footer grip).
 - `ui.settings.addToggle({ label, title, get, set })` adds an on / off switch for a setting of the
-  plugin to the Settings panel (next to Show edges and Selected x-ray) and returns a function that
+  plugin to the Settings panel (next to Show edges, Selected x-ray and Ghost hidden) and returns a function that
   removes it; `get` is re-read whenever the panel opens.
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.

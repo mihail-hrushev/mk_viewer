@@ -366,6 +366,26 @@ new Viewer(canvas, { selectionXray: true });      // or selectionXray: { color: 
   or while off, nothing extra runs; switching it off frees the target. The built-in UI's Settings
   panel has a **Selected x-ray** switch; `examples/models.html?xray=1` starts with it on.
 
+### Ghost hidden
+
+`setGhostHidden` shows the objects hidden with `setVisible(false)` or `isolate(ids, true)` faintly,
+like ghosted ones, instead of not at all, so what was hidden stays in context. Default off.
+
+```ts
+viewer.setGhostHidden(true);
+viewer.getGhostHidden();                          // boolean
+new Viewer(canvas, { ghostHidden: true });
+```
+
+- The visibility state is untouched: `setVisible(true)`, `showAll` and `isolate` work as before,
+  and switching the mode off hides the objects again. Hidden objects stay unpickable and get no
+  selection tint, outline or edge lines, like ghosted ones; the selection x-ray ignores them.
+- Cost while on and something is hidden: one more blended pass over the draw items per image (the
+  vertex shader drops everything that is not hidden), and the draw items whose objects are all
+  hidden come back into the draw list. Nothing extra runs while off or while nothing is hidden.
+  The built-in UI's Settings panel has a **Ghost hidden** switch; `examples/models.html?ghost=1`
+  starts with it on.
+
 ### Stats
 
 `viewer.stats` gives `fps`, `frameMs` (CPU), `gpuMs` (GPU time of the scene passes, when the browser
@@ -697,8 +717,9 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   **Fit**, **Colour** (with a colour picker) and **Clear colour** act on the result.
   `ui.search.find(query)` runs a search from code and shows it in the panel; `ui.search.resultIds`
   is the last result.
-- **Settings** opens the settings panel: switches for **Show edges** (`setEdges`) and **Selected
-  x-ray** (`setSelectionXray`). A switch turned off and on again keeps the options the setting had.
+- **Settings** opens the settings panel: switches for **Show edges** (`setEdges`), **Selected
+  x-ray** (`setSelectionXray`) and **Ghost hidden** (`setGhostHidden`). A switch turned off and on
+  again keeps the options the setting had.
   The rows re-read their state when the panel opens, so settings changed from code show right.
   `ui.settings.addToggle({ label, title, get, set })` adds a switch for a setting of your own and
   returns a function that removes it; `ui.settings.refresh()` re-reads every row.

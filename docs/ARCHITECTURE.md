@@ -229,6 +229,16 @@ non-ghosted fragments already in the id buffer are tinted. Section planes are un
 `discard` in the fragment shader. Transparent materials and ghosted fragments draw in a second,
 blended pass that does not write ids for ghosted fragments.
 
+**Hidden fragments and the ghost-hidden mode.** A hidden fragment (`setVisible(false)`,
+`isolate(ids, true)`) has `Visible` cleared and `Hidden` set, so it is told apart from a removed
+slot (flags 0) on the GPU; the vertex shader collapses both in the normal passes. With
+`setGhostHidden(true)` the renderer runs a second ghost pass (`ghostHidden`: flag filter Hidden set,
+Visible clear, any material, same blended state and faint shading as `ghost`, no ids) over the draw
+list, and the BVH traversal keeps items whose members are all hidden (`CullView.includeHidden`:
+`liveFrags` instead of `visibleFrags` decides, also for the near-plane depth query). The scene state
+is untouched, so hidden objects stay unpickable and keep their visibility across the switch;
+switching restarts the image.
+
 `snap()` (src/core/snap.ts) refines a pick on the CPU copy of the quantized geometry: the query
 sphere is mapped into the mesh's u16 space as a box, triangles are rejected on raw u16 coordinates
 (a lazily built uniform grid for meshes of 50k+ triangles, LRU-bounded), candidates are transformed

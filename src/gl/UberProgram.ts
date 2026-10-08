@@ -51,7 +51,7 @@ export const DEFAULT_LIGHTING: LightingParams = {
   contrast: 1,
 };
 
-export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost' | 'selectedId';
+export type UberPass = 'opaque' | 'transparent' | 'transparentId' | 'ghost' | 'ghostHidden' | 'selectedId';
 
 export class UberProgram {
   readonly program: Program;
@@ -227,6 +227,8 @@ export class UberProgram {
    *  - transparent:   visible, not ghosted, transparent materials; premultiplied colour, no id
    *  - transparentId: same fragments as transparent, writes ids (draw with drawBuffers 'id')
    *  - ghost:         visible + ghosted, any material; faint colour, no id
+   *  - ghostHidden:   hidden (Hidden set, Visible clear; removed slots have neither), any material,
+   *                   ghosted or not; faint colour, no id (the ghost-hidden mode)
    *  - selectedId:    visible + selected, not ghosted, any material; writes ids (the selection x-ray
    *                   pass: draw with drawBuffers 'id' into a target of its own)
    * `materialFilter` false skips the per-vertex material opacity test (use when draw items are
@@ -238,6 +240,7 @@ export class UberProgram {
     const gl = this.ctx.gl;
     const V = FragFlags.Visible;
     const G = FragFlags.Ghosted;
+    const H = FragFlags.Hidden;
     let kind: number = PassKind.Opaque;
     let filter: number = MaterialFilter.Any;
     let mask = V | G;
@@ -260,6 +263,11 @@ export class UberProgram {
       case 'ghost':
         kind = PassKind.Ghost;
         value = V | G;
+        break;
+      case 'ghostHidden':
+        kind = PassKind.Ghost;
+        mask = V | H;
+        value = H;
         break;
       case 'selectedId':
         mask = V | G | FragFlags.Selected;
@@ -291,7 +299,7 @@ export class UberProgram {
  *  - opaque:        depth test LESS, depth write, no blend, drawBuffers all (+ normals)
  *  - transparent:   depth test LEQUAL, no depth write, blend ONE / ONE_MINUS_SRC_ALPHA, drawBuffers color
  *  - transparentId: depth test LEQUAL, depth write, no blend, drawBuffers id (+ normals)
- *  - ghost:         same as transparent
+ *  - ghost, ghostHidden: same as transparent
  *  - selectedId:    depth test LESS, depth write, no blend, drawBuffers id (+ normals)
  */
 export function applyPassState(

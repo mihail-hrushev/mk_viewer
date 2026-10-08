@@ -24,6 +24,11 @@ export interface CullView {
   pixelScale: number;
   /** Items / members whose projected size (AABB diagonal, px) is below this are skipped. */
   pixelThreshold: number;
+  /**
+   * Keep items whose members are all hidden (any alive member counts, not only visible ones): the
+   * ghost-hidden pass draws them. Default false.
+   */
+  includeHidden?: boolean;
 }
 
 /**
@@ -127,7 +132,7 @@ export class DrawBVH {
    * (draw items with visible members; whole subtrees below the size are skipped), or -Infinity.
    * `fz` = view-space depth row (-row 2 of the view matrix: depth = fz0*x + fz1*y + fz2*z + fz3).
    * Used to keep the near plane small when far-away content (e.g. a distant federated model) is
-   * sub-pixel anyway.
+   * sub-pixel anyway. `includeHidden` counts fully hidden items too (ghost-hidden mode).
    */
   visibleDepthMax(
     items: DrawItems,
@@ -135,6 +140,7 @@ export class DrawBVH {
     ex: number, ey: number, ez: number,
     pixelScale: number,
     minPx: number,
+    includeHidden = false,
   ): number {
     if (this.nodeCount === 0) return -Infinity;
     this.stack = grow(this.stack, this.nodeCount * 2 + 4);
@@ -142,7 +148,7 @@ export class DrawBVH {
     const nb = this.nodeBounds;
     const child = this.nodeChild;
     const ib = items.bounds;
-    const vis = items.visibleFrags;
+    const vis = includeHidden ? items.liveFrags : items.visibleFrags;
     let best = -Infinity;
     let sp = 0;
     stack[sp++] = 0;
@@ -513,7 +519,8 @@ export class DrawBVH {
     const ib = items.bounds;
     const kind = items.kind;
     const transp = items.transparent;
-    const visibleFrags = items.visibleFrags;
+    // members that make an item worth drawing: visible ones, or any alive one in ghost-hidden mode
+    const presentFrags = view.includeHidden ? items.liveFrags : items.visibleFrags;
     const ds = items.detailSize;
     const dc = items.detailCount;
     const dl = items.detailLen;
@@ -565,7 +572,7 @@ export class DrawBVH {
       const e = s + ncount[node];
       for (let i = s; i < e; i++) {
         const it = prims[i];
-        if (kind[it] === ITEM_FREE || visibleFrags[it] === 0) continue;
+        if (kind[it] === ITEM_FREE || presentFrags[it] === 0) continue;
         const io = it * 6;
         if (mask !== 0 && cullAabb(planes, ib, io, mask) < 0) continue;
         // minimum visible world size for this item, and its distance

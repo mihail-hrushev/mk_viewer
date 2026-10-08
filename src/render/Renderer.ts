@@ -25,6 +25,7 @@
  *  - restart: camera/projection/viewport change, near/far change, any change of existing fragment
  *    records that affects geometry passes (transform, visibility, colour, ghosting, material),
  *    removal, section planes, background, environment (image or options), context restore,
+ *    the ghost-hidden mode (`setGhostHidden`: hidden fragments drawn by a second ghost pass),
  *    `invalidateImage()`.
  *  - present only (`invalidatePresent()`): selection / hover flags. They are a screen-space overlay
  *    (tint + outline from the id target and the fragment flags, COMPOSITE_FS) composited when the
@@ -115,6 +116,8 @@ export interface RenderHost {
   readonly interacting: boolean;
   /** Number of ghosted fragments (0 skips the ghost pass entirely). */
   ghostCount(): number;
+  /** Number of hidden fragments (0 skips the ghost-hidden pass; only read in ghost-hidden mode). */
+  hiddenCount(): number;
   /** Number of selected objects (0 and no highlight: plain present without overlay). */
   readonly selectionCount: number;
   /** An object is hover-highlighted (overlay needed even without selection). */
@@ -283,6 +286,10 @@ export class Renderer {
   };
 
   // selection x-ray (null = off): the borders of the selected fragments over everything, found on a
+  // ghost-hidden mode: hidden fragments drawn faintly by a second ghost pass (`ghostHidden`), and
+  // fully hidden draw items kept by the traversal
+  private ghostHidden = false;
+
   // target holding only them (ids + depth; no colour, no normals), see drawXray
   private xray: RenderXrayOptions | null = null;
   private xrayTargets: RenderTargets | null = null;
@@ -330,7 +337,7 @@ export class Renderer {
       const e = camera.eye;
       const canvas = this.ctx.canvas as HTMLCanvasElement;
       const dpr = this.targets.height / (canvas.clientHeight || this.targets.height);
-      return scene.bvh.visibleDepthMax(scene.items, fz0, fz1, fz2, fz3, e[0], e[1], e[2], pixelScale / (dpr > 0 ? dpr : 1), 0.5);
+      return scene.bvh.visibleDepthMax(scene.items, fz0, fz1, fz2, fz3, e[0], e[1], e[2], pixelScale / (dpr > 0 ? dpr : 1), 0.5, this.ghostHidden);
     };
     this.offRestored = ctx.on('restored', () => {
       this.budget.resetCeiling();
@@ -454,6 +461,21 @@ export class Renderer {
    * whatever is in front of them (`drawXray`), or null for off. Changing the options only
    * re-presents; switching it off frees its target.
    */
+  /**
+   * Ghost-hidden mode: hidden fragments are drawn like ghosted ones (faint, no ids, not pickable)
+   * by a second ghost pass, and draw items whose members are all hidden stay in the draw list.
+   * Switching restarts the image.
+   */
+  setGhostHidden(on: boolean): void {
+    if (this.ghostHidden === on) return;
+    this.ghostHidden = on;
+    this.invalidateImage();
+  }
+
+  get isGhostHidden(): boolean {
+    return this.ghostHidden;
+  }
+
   setSelectionXray(options: RenderXrayOptions | null): void {
     this.xray = options;
     if (options) {
@@ -843,6 +865,7 @@ export class Renderer {
     const dpr = this.targets.height / (canvas.clientHeight || this.targets.height);
     cv.pixelScale = cam.pixelFactor / (dpr > 0 ? dpr : 1);
     cv.pixelThreshold = threshold;
+    cv.includeHidden = this.ghostHidden;
     this.scene.traverse(cv, this.list);
     this.listThreshold = threshold;
     this.ensureStamps();
@@ -934,7 +957,7 @@ export class Renderer {
   private advanceEmptyPhases(): void {
     const no = this.list.opaqueCount;
     const n = no + this.list.transparentCount;
-    const ghost = this.host.ghostCount() > 0;
+    const ghost = this.ghostPassCount() > 0;
     for (;;) {
       if (this.phase === PHASE_OPAQUE && this.cursor >= no) {
         this.phase = PHASE_TRANSPARENT;
@@ -963,15 +986,31 @@ export class Renderer {
     this.prog.setPass(pass, false); // items are split by transparency already
   }
 
+  /**
+   * Number of ghost passes of this image: one for ghosted fragments, one more for hidden fragments
+   * in ghost-hidden mode (0 skips the GHOST phase). Each pass runs over the whole list; the flag
+   * filter drops the other fragments in the vertex shader.
+   */
+  private ghostPassCount(): number {
+    let n = this.host.ghostCount() > 0 ? 1 : 0;
+    if (this.ghostHidden && this.host.hiddenCount() > 0) n++;
+    return n;
+  }
+
+  /** The k-th ghost pass (k < ghostPassCount()). */
+  private ghostPass(k: number): UberPass {
+    return k === 0 && this.host.ghostCount() > 0 ? 'ghost' : 'ghostHidden';
+  }
+
   /** Moving frame: restart was done; draw what fits, drop the rest. Returns units submitted. */
   private drawMoving(budget: number): number {
     const list = this.list;
     const no = list.opaqueCount;
     const n = no + list.transparentCount;
-    const ghost = this.host.ghostCount() > 0;
+    const gp = this.ghostPassCount();
     this.submitter.resetStats();
     // opaque prefix (importance order); the first entry that does not fit is drawn partially
-    const fo = ghost ? 2 : 1;
+    const fo = 1 + gp;
     const opaqueBudget = n > no ? budget * 0.85 : budget;
     let used = 0;
     let e = 0;
@@ -995,7 +1034,7 @@ export class Renderer {
       e++;
     }
     // transparent: the nearest ones that still fit (list is back to front -> take a suffix)
-    const ft = ghost ? 3 : 2;
+    const ft = 2 + gp;
     let ts = n;
     while (ts > no) {
       const c = this.cost(ts - 1, 0) * ft;
@@ -1015,13 +1054,15 @@ export class Renderer {
       this.drawInOrder(ts, n);
       this.imageHasBlended = true;
     }
-    if (ghost && (e > 0 || ts < n)) {
-      this.setPass('ghost');
-      if (e > 0) {
-        this.groupSlice(0, e);
-        this.submitGroups(0, false);
+    if (gp > 0 && (e > 0 || ts < n)) {
+      for (let k = 0; k < gp; k++) {
+        this.setPass(this.ghostPass(k));
+        if (e > 0) {
+          this.groupSlice(0, e);
+          this.submitGroups(0, false);
+        }
+        if (ts < n) this.drawInOrder(ts, n);
       }
-      if (ts < n) this.drawInOrder(ts, n);
       this.imageHasBlended = true;
     }
     if (ts < n) {
@@ -1092,9 +1133,12 @@ export class Renderer {
           this.drawInOrder(start, e);
           this.imageHasBlended = true;
         } else if (phase === PHASE_GHOST) {
-          this.setPass('ghost');
-          this.groupSlice(start, e);
-          this.submitGroups(start, false);
+          const gp = this.ghostPassCount();
+          for (let k = 0; k < gp; k++) {
+            this.setPass(this.ghostPass(k));
+            this.groupSlice(start, e);
+            this.submitGroups(start, false);
+          }
           this.imageHasBlended = true;
         } else {
           this.setPass('transparentId');

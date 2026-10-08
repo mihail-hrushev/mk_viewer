@@ -1,7 +1,8 @@
 /**
- * Settings panel: on / off switches for viewer settings. Built in: "Show edges" (`viewer.setEdges`)
- * and "Selected x-ray" (`viewer.setSelectionXray`); a switch turned off and on again keeps the
- * options the setting had. `addToggle` adds a row for a setting of your own (viewer plugins: in
+ * Settings panel: on / off switches for viewer settings. Built in: "Show edges" (`viewer.setEdges`),
+ * "Selected x-ray" (`viewer.setSelectionXray`) and "Ghost hidden" (`viewer.setGhostHidden`); a
+ * switch turned off and on again keeps the options the setting had. `addToggle` adds a row for a
+ * setting of your own (viewer plugins: in
  * their `ui(ui)` hook). Every row re-reads its state when the panel opens and after any switch is
  * used, so settings changed from code show right; `refresh()` does it on demand.
  */
@@ -67,6 +68,12 @@ export class SettingsPanel {
         if (!on) xray = viewer.getSelectionXray() ?? xray;
         viewer.setSelectionXray(on, xray);
       },
+    });
+    this.addToggle({
+      label: 'Ghost hidden',
+      title: 'Show hidden objects faintly, like ghosted ones, instead of not at all',
+      get: () => viewer.getGhostHidden(),
+      set: (on) => viewer.setGhostHidden(on),
     });
   }
 

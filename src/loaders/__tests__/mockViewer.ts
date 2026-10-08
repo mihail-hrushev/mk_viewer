@@ -251,6 +251,8 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     getEdges: () => null,
     setSelectionXray: () => {},
     getSelectionXray: () => null,
+    setGhostHidden: () => {},
+    getGhostHidden: () => false,
     on: () => () => {},
     resize() {},
     invalidate() {},

@@ -70,6 +70,11 @@ export const enum FragFlags {
   Highlighted = 8,
   /** Excluded from the id buffer. */
   NotPickable = 16,
+  /**
+   * Hidden by the client (`setVisible(false)`, `isolate(..., true)`): alive, Visible cleared. Tells
+   * a hidden fragment from a removed slot (flags 0), so the ghost-hidden pass can draw it faintly.
+   */
+  Hidden = 32,
 }
 
 // ---------------------------------------------------------------------------

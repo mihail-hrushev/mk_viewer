@@ -188,6 +188,8 @@ export class Viewer implements ViewerApi {
   private selectionCount = 0;
   private ghostDirty = true;
   private ghostN = 0;
+  private hiddenN = 0;
+  private ghostHidden = false;
   private sectionWorld: { n: [number, number, number]; p: [number, number, number] }[] = [];
   private readonly transition = new CameraTransition();
   private readonly listeners: { [K in keyof ViewerEvents]: Set<Listener<K>> } = {
@@ -300,6 +302,7 @@ export class Viewer implements ViewerApi {
         return self.controls?.interacting ?? false;
       },
       ghostCount: () => this.ghostCount(),
+      hiddenCount: () => this.hiddenCount(),
       get selectionCount() {
         return self.selectionCount;
       },
@@ -333,6 +336,7 @@ export class Viewer implements ViewerApi {
     this.resize();
     if (options.edges) this.setEdges(true, options.edges === true ? {} : options.edges);
     if (options.selectionXray) this.setSelectionXray(true, options.selectionXray === true ? {} : options.selectionXray);
+    if (options.ghostHidden) this.setGhostHidden(true);
     if (options.environment != null) {
       this.setEnvironment(options.environment, options.environmentOptions).catch((e) =>
         console.error('mk-viewer: the environment could not be loaded', e),
@@ -1092,6 +1096,16 @@ export class Viewer implements ViewerApi {
     return x ? { color: [x.color[0], x.color[1], x.color[2]], opacity: x.opacity, width: x.width } : null;
   }
 
+  setGhostHidden(enabled: boolean): void {
+    if (this.disposed) return;
+    this.ghostHidden = enabled;
+    this.renderer.setGhostHidden(enabled);
+  }
+
+  getGhostHidden(): boolean {
+    return this.ghostHidden;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // tools and viewer plugins
 
@@ -1508,16 +1522,30 @@ export class Viewer implements ViewerApi {
   }
 
   private ghostCount(): number {
-    if (this.ghostDirty) {
-      const fr = this.scene.fragments;
-      const flags = fr.flags;
-      const want = FragFlags.Visible | FragFlags.Ghosted;
-      let n = 0;
-      for (let f = 0; f < fr.highWater; f++) if ((flags[f] & want) === want) n++;
-      this.ghostN = n;
-      this.ghostDirty = false;
-    }
+    if (this.ghostDirty) this.countFlags();
     return this.ghostN;
+  }
+
+  private hiddenCount(): number {
+    if (this.ghostDirty) this.countFlags();
+    return this.hiddenN;
+  }
+
+  /** Ghosted (visible + ghosted) and hidden fragments; `ghostDirty` is set by whatever changes them. */
+  private countFlags(): void {
+    const fr = this.scene.fragments;
+    const flags = fr.flags;
+    const want = FragFlags.Visible | FragFlags.Ghosted;
+    let g = 0;
+    let h = 0;
+    for (let f = 0; f < fr.highWater; f++) {
+      const fl = flags[f];
+      if ((fl & want) === want) g++;
+      else if (fl & FragFlags.Hidden) h++;
+    }
+    this.ghostN = g;
+    this.hiddenN = h;
+    this.ghostDirty = false;
   }
 
   private cameraChanged(): void {

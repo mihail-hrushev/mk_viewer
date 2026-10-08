@@ -81,6 +81,8 @@ export interface ViewerOptions {
    * `setSelectionXray`). Default off.
    */
   selectionXray?: boolean | SelectionXrayOptions;
+  /** Ghost-hidden mode from the start (see `setGhostHidden`). Default off. */
+  ghostHidden?: boolean;
   /**
    * Viewer plugins (tools, overlays, UI additions; see docs/PLUGIN_API.md), installed in this
    * order at the end of construction. Not to be confused with `loaders` (file format plugins).
@@ -656,6 +658,16 @@ export interface ViewerApi {
   setSelectionXray(enabled: boolean, options?: SelectionXrayOptions): void;
   /** The active selection x-ray settings, or null when it is off. */
   getSelectionXray(): SelectionXrayInfo | null;
+  /**
+   * Ghost-hidden mode: objects hidden with `setVisible(false)` or `isolate(ids, true)` are drawn
+   * faintly, like ghosted ones (not pickable, no ids, no edges), instead of not at all, so what
+   * was hidden stays in context. Their visibility state is unchanged: `setVisible(true)` and
+   * `showAll` work as before, and switching the mode off hides them again. Costs one more blended
+   * pass over the draw items per image while hidden objects exist. Default off.
+   */
+  setGhostHidden(enabled: boolean): void;
+  /** Whether the ghost-hidden mode is on. */
+  getGhostHidden(): boolean;
 
   // --- tools and plugins ---
   /**

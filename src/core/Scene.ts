@@ -230,9 +230,10 @@ export class Scene {
 
   // --- per-objectId state -------------------------------------------------------
 
+  /** Hidden meshes keep the Hidden flag in place of Visible (the ghost-hidden pass finds them). */
   setVisible(objectIds: ObjectSelection, visible: boolean): void {
-    const set = visible ? FragFlags.Visible : 0;
-    const clr = visible ? 0 : FragFlags.Visible;
+    const set = visible ? FragFlags.Visible : FragFlags.Hidden;
+    const clr = visible ? FragFlags.Hidden : FragFlags.Visible;
     forEachObject(objectIds, (id) => this.objectFlags(id, set, clr));
   }
 
@@ -255,12 +256,13 @@ export class Scene {
     });
     const V = FragFlags.Visible;
     const G = FragFlags.Ghosted;
+    const H = FragFlags.Hidden;
     for (let f = 0; f < hw; f++) {
       if (!fr.isAlive(f)) continue;
       const cur = fr.flags[f];
       let nf: number;
-      if (mark[f]) nf = (cur | V) & ~G;
-      else if (hideOthers) nf = cur & ~(V | G);
+      if (mark[f]) nf = (cur | V) & ~(G | H);
+      else if (hideOthers) nf = (cur & ~(V | G)) | H;
       else nf = cur | G;
       this.applyFlags(f, nf);
     }
@@ -271,7 +273,7 @@ export class Scene {
     const fr = this.fragments;
     for (let f = 0; f < fr.highWater; f++) {
       if (!fr.isAlive(f)) continue;
-      this.applyFlags(f, (fr.flags[f] | FragFlags.Visible) & ~FragFlags.Ghosted);
+      this.applyFlags(f, (fr.flags[f] | FragFlags.Visible) & ~(FragFlags.Ghosted | FragFlags.Hidden));
     }
   }
 
