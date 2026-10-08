@@ -14,6 +14,7 @@ import {
   NAMED_COLORS,
   STATUS_FILE_EXTENSIONS,
   colorToHex,
+  detectSeparator,
   isStatusFile,
   parseColor,
   parseStatusRows,
@@ -92,10 +93,22 @@ describe('status plugin: parsing', () => {
     expect(colorToHex([1, 0.5, 0])).toBe('#ff8000');
   });
 
-  it('splits on tabs when there are any, else semicolons, else commas, else whitespace', () => {
+  it('splits on tabs when there are any, else semicolons, else commas; never on spaces', () => {
     expect(splitRow('a b\tStatus X\t\tred')).toEqual(['a b', 'Status X', '', 'red']);
-    expect(splitRow('  a   b  c ')).toEqual(['a', 'b', 'c']);
+    expect(splitRow('  CMPUBB #2 ')).toEqual(['CMPUBB #2']);
     expect(splitRow('a b; Status X;;red')).toEqual(['a b', 'Status X', '', 'red']);
+    // the separator of the whole text applies to every line, so a lone tag keeps its comma
+    expect(detectSeparator('a,b\tS\nc,d\n')).toBe('\t');
+    expect(splitRow('c,d', '\t')).toEqual(['c,d']);
+    expect(detectSeparator('CMPUBB #2\nCPP4W540 #2\n')).toBeNull();
+    expect(parseStatusRows('CMPUBB #2\nCPP4W540 #2\n').map((r) => [r.tag, r.status, r.state])).toEqual([
+      ['CMPUBB #2', DEFAULT_STATUS, 'CMPUBB #2'],
+      ['CPP4W540 #2', DEFAULT_STATUS, 'CPP4W540 #2'],
+    ]);
+    expect(parseStatusRows('CMPUBB #2\tS\nC1F2NK3\n').map((r) => [r.tag, r.status])).toEqual([
+      ['CMPUBB #2', 'S'],
+      ['C1F2NK3', DEFAULT_STATUS],
+    ]);
     expect(splitRow('a b,Status X,,red')).toEqual(['a b', 'Status X', '', 'red']);
     // a tab wins over a semicolon, a semicolon over a comma
     expect(splitRow('a;b\tc,d')).toEqual(['a;b', 'c,d']);

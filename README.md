@@ -623,9 +623,10 @@ object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `l
 **Status** (`statusPlugin`): the **Status** toolbar button opens a legend of statuses and states
 built from pasted rows or dropped CSV files, matched against the loaded models. One row per line:
 `Tag  Status  State  Colour`, tab separated (a spreadsheet paste), else semicolon or comma
-separated (a CSV file, either locale; cells may be double-quoted), else split on whitespace;
-columns beyond the fourth are ignored, and a first line starting with `Tag` is a header and is
-skipped. Only the tag is mandatory: the status defaults to `Default`, the state to the tag, the
+separated (a CSV file, either locale; cells may be double-quoted). The separator is detected once
+for the whole text; spaces never separate columns, so a text without any separator is a list of
+tags (`CMPUBB #2` stays one tag). Columns beyond the fourth are ignored, and a first line starting
+with `Tag` is a header and is skipped. Only the tag is mandatory: the status defaults to `Default`, the state to the tag, the
 colour to `#DDDDDD`. A `.csv`, `.tsv` or `.txt` file of such rows can be dropped on the viewer or
 on the panel, or opened with the panel's **Open…** button; its rows without a status go under a
 status named after the file (`Erection.csv` → `Erection`), so a file per status with one tag per

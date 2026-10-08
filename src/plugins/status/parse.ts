@@ -116,17 +116,24 @@ function unquote(cell: string): string {
   return t;
 }
 
+/** A column separator: tab (a spreadsheet paste), semicolon or comma (a CSV file, either locale). */
+export type Separator = '\t' | ';' | ',';
+
 /**
- * Splits one line into its columns. Lines with a tab are split on tabs (so tags and states may
- * contain spaces, as in a spreadsheet paste); otherwise lines with a semicolon are split on
- * semicolons and lines with a comma on commas (CSV files, either locale); lines without any are
- * split on runs of whitespace, so a hand-typed `tag status state colour` works too. Cells may be
- * double-quoted.
+ * The separator of a text: tab when it contains one, else semicolon, else comma, else null (a
+ * single column: one tag per line). Decided once for the whole text, so a tag like `CMPUBB #2` or
+ * `a,b` in a tab separated file stays whole; spaces never separate columns.
  */
-export function splitRow(line: string): string[] {
-  const sep = line.includes('\t') ? '\t' : line.includes(';') ? ';' : line.includes(',') ? ',' : null;
-  const cells = sep ? line.split(sep) : line.trim().split(/\s+/);
-  return cells.map(unquote);
+export function detectSeparator(text: string): Separator | null {
+  return text.includes('\t') ? '\t' : text.includes(';') ? ';' : text.includes(',') ? ',' : null;
+}
+
+/**
+ * Splits one line into its columns on `sep` (default: the separator detected in the line itself);
+ * without a separator the whole line is the one column. Cells may be double-quoted.
+ */
+export function splitRow(line: string, sep: Separator | null = detectSeparator(line)): string[] {
+  return (sep ? line.split(sep) : [line]).map(unquote);
 }
 
 export interface ParseStatusOptions {
@@ -140,19 +147,22 @@ export function isHeaderRow(cells: readonly string[]): boolean {
 }
 
 /**
- * Parses pasted text or the content of a CSV file into rows. A leading byte order mark and a
- * header line (first cell `Tag`) are skipped, as are empty lines and lines without a tag. Columns
- * beyond the fourth are ignored. Defaults: status `Default` (or `options.defaultStatus`, e.g. the
- * file name), state = tag, colour `#DDDDDD`. A colour that cannot be parsed keeps its text and
- * gets `rgb: null`; the caller decides what to do with it.
+ * Parses pasted text or the content of a CSV file into rows. The column separator is detected
+ * once for the whole text (`detectSeparator`); without one every line is a tag. A leading byte
+ * order mark and a header line (first cell `Tag`) are skipped, as are empty lines and lines
+ * without a tag. Columns beyond the fourth are ignored. Defaults: status `Default` (or
+ * `options.defaultStatus`, e.g. the file name), state = tag, colour `#DDDDDD`. A colour that
+ * cannot be parsed keeps its text and gets `rgb: null`; the caller decides what to do with it.
  */
 export function parseStatusRows(text: string, options: ParseStatusOptions = {}): StatusRow[] {
   const defaultStatus = options.defaultStatus?.trim() || DEFAULT_STATUS;
   const rows: StatusRow[] = [];
+  const body = text.replace(/^\uFEFF/, '');
+  const sep = detectSeparator(body);
   let first = true;
-  for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+  for (const raw of body.split(/\r?\n/)) {
     if (raw.trim() === '') continue;
-    const cells = splitRow(raw);
+    const cells = splitRow(raw, sep);
     const header = first && isHeaderRow(cells);
     first = false;
     if (header) continue;
