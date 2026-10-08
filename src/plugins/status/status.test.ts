@@ -229,6 +229,18 @@ describe('status plugin: headless API', () => {
     expect(v.getSelection().length).toBe(3);
     status.select('S1');
     expect(v.getSelection().length).toBe(4);
+    // add = true: union with the current selection (no duplicates, sorted)
+    status.select('S2', 'L', true);
+    expect(v.getSelection().length).toBe(5);
+    status.select('S1', 'A', true);
+    expect(v.getSelection().length).toBe(5);
+    const sel = v.getSelection();
+    expect(sel).toEqual([...sel].sort((a, b) => a - b));
+    status.select('S2', 'nope', true); // an unknown state adds nothing
+    expect(v.getSelection().length).toBe(5);
+    v.select([]);
+    status.select('S2', 'L', true); // nothing selected: just the state
+    expect(v.getSelection().length).toBe(1);
 
     status.applyColors(); // nothing checked
     expect(v.getColoredObjects().length).toBe(0);

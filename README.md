@@ -642,13 +642,15 @@ Matching is asynchronous, one state per task, so the legend shows at once with p
 fills in; it runs again when a model is loaded or unloaded. In the panel: paste the rows and click
 **Add**; every status is a collapsible row with a checkbox, its object count and a trash icon that
 removes it (and its colours); unfolded, it lists its states with a colour swatch and the number of
-matched objects, and clicking a state selects them. **Colour** colours the objects of every checked
+matched objects, and clicking a state selects them (Shift + click adds them to the current
+selection). **Colour** colours the objects of every checked
 status by state, **Isolate** shows only those same objects and hides the rest (the toolbar's
 **Show all** undoes it), **Reset** removes the colours, **Fit** frames the selected objects (the
 `F` key does the same anywhere over the canvas), **Clear** removes every status. Headless:
 `add(text | rows, { defaultStatus? })` (returns `{ rows, invalidColors }`; nothing is matched
 synchronously), `await addFile(file)`, `await resolve()`, `statuses`, `objectIdsOf(status, state?)`,
-`select(status, state?)`, `applyColors(statuses?)` (default: the checked ones),
+`select(status, state?, add?)` (`add`: union with the current selection), `applyColors(statuses?)`
+(default: the checked ones),
 `isolate(statuses?, hideOthers = true)` (same default), `resetColors(statuses?)` (default: all), `remove(status)`, `clear()`, `setChecked(status, checked)`,
 `on('changed', fn)`; `parseStatusRows(text, { defaultStatus? })`, `parseColor(text)` and
 `isStatusFile(name)` are exported as well. Options: `key`, `label`, `ui`

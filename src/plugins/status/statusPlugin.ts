@@ -121,8 +121,11 @@ export interface StatusPlugin extends PluginInstance {
   resolve(force?: boolean): Promise<void>;
   /** The objects of one state, or of all states of a status (sorted, unique). */
   objectIdsOf(status: string, state?: string): Float64Array;
-  /** Selects the objects of a state or a whole status. */
-  select(status: string, state?: string): void;
+  /**
+   * Selects the objects of a state or a whole status; with `add` they are added to the current
+   * selection instead of replacing it (the panel: Shift + click on a state).
+   */
+  select(status: string, state?: string, add?: boolean): void;
   /** Colours the objects of every state of these statuses (default: the checked ones). */
   applyColors(statuses?: readonly string[]): void;
   /**
@@ -299,8 +302,13 @@ class StatusPluginImpl implements StatusPlugin {
     return ids;
   }
 
-  select(name: string, state?: string): void {
-    this.viewer.select(this.objectIdsOf(name, state));
+  select(name: string, state?: string, add = false): void {
+    let ids = this.objectIdsOf(name, state);
+    if (add) {
+      const current = Float64Array.from(this.viewer.getSelection()).sort();
+      if (current.length > 0) ids = ids.length === 0 ? current : sortedUnion(current, ids);
+    }
+    this.viewer.select(ids);
   }
 
   applyColors(names?: readonly string[]): void {
@@ -620,7 +628,7 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
       for (const st of status.states) {
         const row = doc.createElement('div');
         row.className = 'mkv-status-state';
-        row.title = `${st.tags.length} tag${st.tags.length === 1 ? '' : 's'}, colour ${st.colorText}. Click to select the matched objects`;
+        row.title = `${st.tags.length} tag${st.tags.length === 1 ? '' : 's'}, colour ${st.colorText}. Click to select the matched objects, Shift + click to add them to the selection`;
         const swatch = doc.createElement('span');
         swatch.className = 'mkv-status-swatch';
         swatch.style.background = colorToHex(st.color);
@@ -628,7 +636,7 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
         text.className = 'mkv-status-label';
         text.textContent = `${st.name}: ${st.resolved ? st.objectIds.length : '…'}`;
         row.append(swatch, text);
-        row.onclick = () => plugin.select(status.name, st.name);
+        row.onclick = (e) => plugin.select(status.name, st.name, e.shiftKey);
         states.append(row);
       }
       legend.append(states);
