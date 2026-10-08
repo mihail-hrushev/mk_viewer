@@ -3,7 +3,8 @@
  * and show / hide / fit / isolate / unload each loaded model. It lists every load of the viewer,
  * whoever started it. `footer` is free space for the host page (status text, statistics).
  * A Radiance `.hdr` file among the opened / dropped files becomes the environment lighting
- * (`viewer.setEnvironment`); the active environment is shown with a button to clear it.
+ * (`viewer.setEnvironment`); the active environment is shown with a button to clear it. Other
+ * file kinds can be claimed by `addFileHandler` (the status plugin takes CSV row files).
  */
 import type { ViewerApi } from '../types';
 import type { LoadTask } from '../loaders/types';
@@ -26,6 +27,7 @@ export class ModelsPanel {
   private readonly envBox: HTMLElement;
   private readonly loads = new Map<LoadTask, RunningLoad>();
   private readonly unsubscribe: (() => void)[] = [];
+  private readonly fileHandlers: ((file: File) => boolean)[] = [];
 
   constructor(viewer: ViewerApi, parent: HTMLElement, onToggle?: (open: boolean) => void) {
     this.viewer = viewer;
@@ -95,12 +97,28 @@ export class ModelsPanel {
   }
 
   /**
+   * Registers a handler for opened / dropped files. Every file goes to the handlers first, in
+   * registration order; a handler that returns true takes the file, which is then not loaded as a
+   * model. Returns a function that unregisters the handler. Plugins use this to accept their own
+   * file kinds (the status plugin takes `.csv` / `.tsv` / `.txt` row files).
+   */
+  addFileHandler(handler: (file: File) => boolean): () => void {
+    this.fileHandlers.push(handler);
+    return () => {
+      const i = this.fileHandlers.indexOf(handler);
+      if (i >= 0) this.fileHandlers.splice(i, 1);
+    };
+  }
+
+  /**
    * Loads the given files as models; `.bin` companions of a multi-file glTF are resolved by name. A
-   * `.hdr` file is set as the environment lighting instead.
+   * `.hdr` file is set as the environment lighting instead, and a file a registered handler takes
+   * (`addFileHandler`) is left to it.
    */
   loadFiles(list: FileList | File[]): void {
     const files = Array.from(list);
     for (const f of files) {
+      if (this.fileHandlers.some((h) => h(f))) continue;
       if (/\.bin$/i.test(f.name)) continue;
       if (/\.hdr$/i.test(f.name)) {
         // the error message already names the file

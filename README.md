@@ -621,10 +621,15 @@ object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `l
 `name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 **Status** (`statusPlugin`): the **Status** toolbar button opens a legend of statuses and states
-built from pasted rows, matched against the loaded models. One row per line, tab separated: `Tag
-Status  State  Colour` (a line without a tab is split on whitespace; columns beyond the fourth are
-ignored). Only the tag is mandatory: the status defaults to `Default`, the state to the tag, the
-colour to `#DDDDDD`. A colour is `#rgb` / `#rrggbb` (the `#` optional, case-insensitive) or a name
+built from pasted rows or dropped CSV files, matched against the loaded models. One row per line:
+`Tag  Status  State  Colour`, tab separated (a spreadsheet paste), else semicolon or comma
+separated (a CSV file, either locale; cells may be double-quoted), else split on whitespace;
+columns beyond the fourth are ignored, and a first line starting with `Tag` is a header and is
+skipped. Only the tag is mandatory: the status defaults to `Default`, the state to the tag, the
+colour to `#DDDDDD`. A `.csv`, `.tsv` or `.txt` file of such rows can be dropped on the viewer or
+on the panel, or opened with the panel's **Open…** button; its rows without a status go under a
+status named after the file (`Erection.csv` → `Erection`), so a file per status with one tag per
+line is enough. A colour is `#rgb` / `#rrggbb` (the `#` optional, case-insensitive) or a name
 (`red`, `green`, `blue`, `yellow`, `magenta`, `cyan`, `pink`, `lime`, `coral`, `gray`, `white`,
 `black`, `maroon`, ...; the whole list is the exported `NAMED_COLORS`); an unknown colour gets the
 default and is reported. Tags are matched against the hierarchy node names, case-insensitive (the
@@ -639,11 +644,12 @@ removes it (and its colours); unfolded, it lists its states with a colour swatch
 matched objects, and clicking a state selects them. **Colour** colours the objects of every checked
 status by state, **Reset** removes those colours, **Fit** frames the selected objects (the
 `F` key does the same anywhere over the canvas), **Clear** removes every status. Headless:
-`add(text | rows)` (returns `{ rows, invalidColors }`; nothing is matched synchronously), `await
-resolve()`, `statuses`, `objectIdsOf(status, state?)`, `select(status, state?)`,
-`applyColors(statuses?)` (default: the checked ones), `resetColors(statuses?)` (default: all),
-`remove(status)`, `clear()`, `setChecked(status, checked)`, `on('changed', fn)`;
-`parseStatusRows(text)` and `parseColor(text)` are exported as well. Options: `key`, `label`, `ui`
+`add(text | rows, { defaultStatus? })` (returns `{ rows, invalidColors }`; nothing is matched
+synchronously), `await addFile(file)`, `await resolve()`, `statuses`, `objectIdsOf(status, state?)`,
+`select(status, state?)`, `applyColors(statuses?)` (default: the checked ones),
+`resetColors(statuses?)` (default: all), `remove(status)`, `clear()`, `setChecked(status, checked)`,
+`on('changed', fn)`; `parseStatusRows(text, { defaultStatus? })`, `parseColor(text)` and
+`isStatusFile(name)` are exported as well. Options: `key`, `label`, `ui`
 (false: no button and no panel), `name`. The colours are `setColor` overrides; removing a status or
 the plugin removes them.
 

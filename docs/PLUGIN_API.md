@@ -312,6 +312,11 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - `ui.settings.addToggle({ label, title, get, set })` adds an on / off switch for a setting of the
   plugin to the Settings panel (next to Show edges, Selected x-ray and Ghost hidden) and returns a function that
   removes it; `get` is re-read whenever the panel opens.
+- `ui.models.addFileHandler((file) => boolean)` lets the plugin claim files opened with the Models
+  panel's file picker or dropped on the viewer: every file is offered to the handlers first, in
+  registration order, and one that returns true takes the file (it is then not loaded as a model).
+  Returns a function that unregisters the handler. The status plugin takes `.csv` / `.tsv` / `.txt`
+  row files this way.
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 
@@ -528,10 +533,11 @@ only.
 
 `statusPlugin()` (`src/plugins/status/`) has no tool and no overlay: it is a **panel** over a
 **headless, asynchronous** API, and shows the parts the other two examples do not. The user pastes
-rows `Tag  Status  State  Colour` (tab separated; only the tag is mandatory, see the
-[README](../README.md#viewer-plugins-and-the-measurement-tool)), the plugin matches the tags
-against the loaded models and shows a legend of statuses and states with counts, from which the
-user selects and colours.
+rows `Tag  Status  State  Colour` (tab, semicolon or comma separated; only the tag is mandatory,
+see the [README](../README.md#viewer-plugins-and-the-measurement-tool)) or drops `.csv` / `.tsv` /
+`.txt` files of such rows on the viewer or the panel, the plugin matches the tags against the
+loaded models and shows a legend of statuses and states with counts, from which the user selects
+and colours.
 
 - **A toolbar toggle and a panel** in the `ui(ui)` hook: `ui.addToggle({ label, title, onClick: ()
   => panel.toggle() })` and `new Panel(ui.element, { title, dock: 'right', height: 'auto', onToggle:
@@ -539,6 +545,11 @@ user selects and colours.
   The panel's content (a textarea, buttons, the legend) goes into `panel.body`. The hook returns a
   cleanup that unsubscribes, removes the toggle and disposes the panel; `dispose()` calls the same
   cleanup. With the `ui: false` option the hook does nothing and the plugin is headless.
+- **Row files** (`addFile(file)`, the file read with `file.text()` and parsed like pasted text;
+  rows without a status column go under a status named after the file): the hook registers
+  `ui.models.addFileHandler` for `.csv` / `.tsv` / `.txt` files dropped on the viewer, listens to
+  `drop` on `panel.body` for files dropped on the panel, and offers an **Open…** file picker. The
+  cleanup unregisters the handler and the listeners.
 - **Matching through the property index**: one `viewer.findObjects({ key, in: tags })` per state
   (`key` defaults to `'name'`, the hierarchy node names; case-insensitive). The result's `objectIds`
   (sorted, unique; a tag that matches a group node brings its whole subtree) become the state's

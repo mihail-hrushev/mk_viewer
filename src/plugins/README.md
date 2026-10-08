@@ -6,10 +6,10 @@ and the built-in plugins:
 - `measure/`: `measurePlugin()`, distance measurement with snapping (tool, overlay, toolbar toggle,
   context menu entry);
 - `color/`: `colorPlugin()`, "Red" / "Reset colour" context menu entries (the worked example);
-- `status/`: `statusPlugin()`, a legend of statuses and states built from pasted
-  `Tag  Status  State  Colour` rows, matched against node names (toolbar toggle, panel, async
-  resolution, selection and colour overrides per state; `parse.ts` holds the row and colour
-  parsing).
+- `status/`: `statusPlugin()`, a legend of statuses and states built from pasted or dropped
+  (`.csv` / `.tsv` / `.txt`) `Tag  Status  State  Colour` rows, matched against node names
+  (toolbar toggle, panel, async resolution, selection and colour overrides per state, files claimed
+  through `ui.models.addFileHandler`; `parse.ts` holds the row, file name and colour parsing).
 
 How to write a viewer plugin (lifecycle, everything a plugin can use, rules, walkthrough) is
 documented in [`docs/PLUGIN_API.md`](../../docs/PLUGIN_API.md). Built-in plugins follow the same

@@ -8,7 +8,18 @@ import { createHeadlessViewer, type HeadlessViewer } from '../../__tests__/headl
 import type { LoadContext, LoaderPlugin } from '../../loaders';
 import { box } from '../../primitives';
 import type { ViewerUi } from '../../ui/ViewerUi';
-import { DEFAULT_COLOR_NAME, DEFAULT_STATUS, NAMED_COLORS, colorToHex, parseColor, parseStatusRows, splitRow } from './parse';
+import {
+  DEFAULT_COLOR_NAME,
+  DEFAULT_STATUS,
+  NAMED_COLORS,
+  STATUS_FILE_EXTENSIONS,
+  colorToHex,
+  isStatusFile,
+  parseColor,
+  parseStatusRows,
+  splitRow,
+  statusNameOfFile,
+} from './parse';
 import { statusPlugin, type StatusPlugin } from './statusPlugin';
 
 /**
@@ -81,9 +92,48 @@ describe('status plugin: parsing', () => {
     expect(colorToHex([1, 0.5, 0])).toBe('#ff8000');
   });
 
-  it('splits on tabs when there are any, else on whitespace', () => {
+  it('splits on tabs when there are any, else semicolons, else commas, else whitespace', () => {
     expect(splitRow('a b\tStatus X\t\tred')).toEqual(['a b', 'Status X', '', 'red']);
     expect(splitRow('  a   b  c ')).toEqual(['a', 'b', 'c']);
+    expect(splitRow('a b; Status X;;red')).toEqual(['a b', 'Status X', '', 'red']);
+    expect(splitRow('a b,Status X,,red')).toEqual(['a b', 'Status X', '', 'red']);
+    // a tab wins over a semicolon, a semicolon over a comma
+    expect(splitRow('a;b\tc,d')).toEqual(['a;b', 'c,d']);
+    expect(splitRow('a,b;c')).toEqual(['a,b', 'c']);
+    // double-quoted cells (Excel CSV): quotes stripped, "" is one quote
+    expect(splitRow('"304-SP001";"Erection";"Fab ""A""";"#ff0"')).toEqual(['304-SP001', 'Erection', 'Fab "A"', '#ff0']);
+    expect(splitRow('"a,b",c')).toEqual(['"a', 'b"', 'c']); // a separator inside quotes is not supported
+  });
+
+  it('parses CSV files: BOM, header line, semicolons, a default status', () => {
+    const csv = '\uFEFFTag;Status;State;Colour\r\n304-SP001;Erection;Fab;yellow\r\n440-SP003;;Erected;\r\n';
+    expect(parseStatusRows(csv).map((r) => [r.tag, r.status, r.state, r.color])).toEqual([
+      ['304-SP001', 'Erection', 'Fab', 'yellow'],
+      ['440-SP003', DEFAULT_STATUS, 'Erected', DEFAULT_COLOR_NAME],
+    ]);
+    expect(parseStatusRows(csv, { defaultStatus: 'Painting' })[1].status).toBe('Painting');
+    expect(parseStatusRows('x', { defaultStatus: '  ' })[0].status).toBe(DEFAULT_STATUS);
+    // the header is only skipped as the first non-empty line; "tag" later is a tag
+    expect(parseStatusRows('\n  \ntag\nTAG,S\n').map((r) => r.tag)).toEqual(['TAG']);
+    expect(parseStatusRows('a\nTag\n').map((r) => r.tag)).toEqual(['a', 'Tag']);
+    // a one-column file: a tag per line
+    expect(parseStatusRows('A\nB\n', { defaultStatus: 'Erection' }).map((r) => [r.tag, r.status, r.state])).toEqual([
+      ['A', 'Erection', 'A'],
+      ['B', 'Erection', 'B'],
+    ]);
+  });
+
+  it('recognises row files by extension and names the status after the file', () => {
+    expect(STATUS_FILE_EXTENSIONS).toEqual(['csv', 'tsv', 'txt']);
+    expect(isStatusFile('Erection.csv')).toBe(true);
+    expect(isStatusFile('a.TSV')).toBe(true);
+    expect(isStatusFile('notes.txt')).toBe(true);
+    expect(isStatusFile('model.glb')).toBe(false);
+    expect(isStatusFile('csv')).toBe(false);
+    expect(statusNameOfFile('Erection.csv')).toBe('Erection');
+    expect(statusNameOfFile('C:\\x\\Painting status.CSV')).toBe('Painting status');
+    expect(statusNameOfFile('/a/b/.csv')).toBe('.csv');
+    expect(statusNameOfFile('noext')).toBe('noext');
   });
 
   it('parses rows with defaults and skips empty lines and lines without a tag', () => {
@@ -236,6 +286,25 @@ describe('status plugin: headless API', () => {
     const cleanup = st.ui!(fakeUi);
     expect(calls).toEqual([]);
     expect(typeof cleanup).toBe('function');
+  });
+
+  it('addFile reads a CSV file, skips its header and names the status after the file when the column is empty', async () => {
+    const { status } = await setup();
+    const csv = new File(['﻿Tag;Status;State;Colour\r\nP0-0;;Fab;yellow\r\nG1;Painting;Done;#00ff00\r\n'], 'Erection.csv', { type: 'text/csv' });
+    const r = await status.addFile(csv);
+    expect(r).toEqual({ rows: 2, invalidColors: [] });
+    const tags = new File(['loose\nP0-1\n'], 'Hydrotest.txt');
+    expect(await status.addFile(tags)).toEqual({ rows: 2, invalidColors: [] });
+    await status.resolve();
+    expect(status.statuses.map((s) => [s.name, s.states.map((st) => [st.name, st.colorText, st.objectIds.length])])).toEqual([
+      ['Erection', [['Fab', 'yellow', 1]]],
+      ['Painting', [['Done', '#00ff00', 3]]],
+      ['Hydrotest', [['loose', DEFAULT_COLOR_NAME, 1], ['P0-1', DEFAULT_COLOR_NAME, 1]]],
+    ]);
+    // after disposal the file's rows are dropped
+    hv!.viewer.removePlugin('status');
+    expect(await status.addFile(tags)).toEqual({ rows: 0, invalidColors: [] });
+    expect(status.statuses).toEqual([]);
   });
 
   it('a custom key matches another property', async () => {

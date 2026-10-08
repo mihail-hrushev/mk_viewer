@@ -1,6 +1,7 @@
 /**
- * Parsing for the status plugin: the pasted rows (tab separated `Tag  Status  State  Colour`) and
- * the colour column (`#rgb`, `#rrggbb` or one of the named colours below). Pure functions, no DOM.
+ * Parsing for the status plugin: the rows (`Tag  Status  State  Colour`, pasted or from a CSV file;
+ * tab, semicolon or comma separated) and the colour column (`#rgb`, `#rrggbb` or one of the named
+ * colours below). Pure functions, no DOM.
  */
 import type { Color } from '../../types';
 
@@ -92,31 +93,75 @@ export function colorToHex(c: Color): string {
   return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
 }
 
-/**
- * Splits one line into its columns. Lines with a tab are split on tabs (so tags and states may
- * contain spaces, as in a spreadsheet paste); lines without one are split on runs of whitespace,
- * so a hand-typed `tag status state colour` works too.
- */
-export function splitRow(line: string): string[] {
-  const cells = line.includes('\t') ? line.split('\t') : line.trim().split(/\s+/);
-  return cells.map((c) => c.trim());
+/** File extensions (lower case, without the dot) accepted as status row files. */
+export const STATUS_FILE_EXTENSIONS: readonly string[] = ['csv', 'tsv', 'txt'];
+
+/** True when the file name has one of `STATUS_FILE_EXTENSIONS`. */
+export function isStatusFile(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  return dot >= 0 && STATUS_FILE_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+}
+
+/** The file name without its directory and extension (`C:/x/Erection.csv` → `Erection`). */
+export function statusNameOfFile(name: string): string {
+  const base = name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+  const dot = base.lastIndexOf('.');
+  return (dot > 0 ? base.slice(0, dot) : base).trim();
+}
+
+/** Strips the surrounding double quotes of a CSV cell (`""` inside is one quote) and trims it. */
+function unquote(cell: string): string {
+  const t = cell.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1).replace(/""/g, '"').trim();
+  return t;
 }
 
 /**
- * Parses pasted text into rows. Empty lines and lines without a tag are skipped. Columns beyond
- * the fourth are ignored. Defaults: status `Default`, state = tag, colour `#DDDDDD`. A colour that
- * cannot be parsed keeps its text and gets `rgb: null`; the caller decides what to do with it.
+ * Splits one line into its columns. Lines with a tab are split on tabs (so tags and states may
+ * contain spaces, as in a spreadsheet paste); otherwise lines with a semicolon are split on
+ * semicolons and lines with a comma on commas (CSV files, either locale); lines without any are
+ * split on runs of whitespace, so a hand-typed `tag status state colour` works too. Cells may be
+ * double-quoted.
  */
-export function parseStatusRows(text: string): StatusRow[] {
+export function splitRow(line: string): string[] {
+  const sep = line.includes('\t') ? '\t' : line.includes(';') ? ';' : line.includes(',') ? ',' : null;
+  const cells = sep ? line.split(sep) : line.trim().split(/\s+/);
+  return cells.map(unquote);
+}
+
+export interface ParseStatusOptions {
+  /** Status of the rows whose status column is empty. Default `DEFAULT_STATUS`. */
+  defaultStatus?: string;
+}
+
+/** True for a header line `Tag  Status  State  Colour` (only the first cell is looked at). */
+export function isHeaderRow(cells: readonly string[]): boolean {
+  return cells.length > 0 && cells[0].toLowerCase() === 'tag';
+}
+
+/**
+ * Parses pasted text or the content of a CSV file into rows. A leading byte order mark and a
+ * header line (first cell `Tag`) are skipped, as are empty lines and lines without a tag. Columns
+ * beyond the fourth are ignored. Defaults: status `Default` (or `options.defaultStatus`, e.g. the
+ * file name), state = tag, colour `#DDDDDD`. A colour that cannot be parsed keeps its text and
+ * gets `rgb: null`; the caller decides what to do with it.
+ */
+export function parseStatusRows(text: string, options: ParseStatusOptions = {}): StatusRow[] {
+  const defaultStatus = options.defaultStatus?.trim() || DEFAULT_STATUS;
   const rows: StatusRow[] = [];
-  for (const raw of text.split(/\r?\n/)) {
+  let first = true;
+  for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
     if (raw.trim() === '') continue;
-    const [tag = '', status = '', state = '', color = ''] = splitRow(raw);
+    const cells = splitRow(raw);
+    const header = first && isHeaderRow(cells);
+    first = false;
+    if (header) continue;
+    const [tag = '', status = '', state = '', color = ''] = cells;
     if (tag === '') continue;
     const colorText = color === '' ? DEFAULT_COLOR_NAME : color;
     rows.push({
       tag,
-      status: status === '' ? DEFAULT_STATUS : status,
+      status: status === '' ? defaultStatus : status,
       state: state === '' ? tag : state,
       color: colorText,
       rgb: parseColor(colorText),

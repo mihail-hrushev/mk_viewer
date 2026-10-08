@@ -8,5 +8,14 @@ export type { MeasurePlugin, MeasureOptions, Measurement, MeasurePoint, MeasureE
 export { colorPlugin } from './color/colorPlugin';
 export type { ColorPlugin, ColorPluginOptions } from './color/colorPlugin';
 export { statusPlugin } from './status/statusPlugin';
-export type { StatusPlugin, StatusPluginOptions, Status, StatusState, StatusAddResult, StatusEvents, StatusRow } from './status/statusPlugin';
-export { parseStatusRows, parseColor, NAMED_COLORS } from './status/parse';
+export type {
+  StatusPlugin,
+  StatusPluginOptions,
+  Status,
+  StatusState,
+  StatusAddResult,
+  StatusEvents,
+  StatusRow,
+  ParseStatusOptions,
+} from './status/statusPlugin';
+export { parseStatusRows, parseColor, isStatusFile, NAMED_COLORS, STATUS_FILE_EXTENSIONS } from './status/parse';

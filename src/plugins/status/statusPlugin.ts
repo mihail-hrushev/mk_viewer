@@ -10,12 +10,14 @@
  *   status.select('Erection', 'Fab');
  *   status.applyColors(['Erection']);
  *
- * Input rows are `Tag  Status  State  Colour` (tab separated; only the tag is mandatory, see
- * `parseStatusRows`). Tags are matched against hierarchy node names (`viewer.findObjects` with the
- * key `name`, case-insensitive); a tag that matches a group node matches its whole subtree. Rows
- * added later merge into the legend: a new status or state is created, a known one receives the
- * tags (and the last colour given wins). A tag listed under two states belongs to both; when both
- * are coloured, the later one applied wins.
+ * Input rows are `Tag  Status  State  Colour` (tab, semicolon or comma separated; only the tag is
+ * mandatory, see `parseStatusRows`), pasted into the panel or read from `.csv` / `.tsv` / `.txt`
+ * files dropped on the viewer or the panel (`addFile`; rows without a status column go under a
+ * status named after the file). Tags are matched against hierarchy node names (`viewer.findObjects`
+ * with the key `name`, case-insensitive); a tag that matches a group node matches its whole
+ * subtree. Rows added later merge into the legend: a new status or state is created, a known one
+ * receives the tags (and the last colour given wins). A tag listed under two states belongs to
+ * both; when both are coloured, the later one applied wins.
  *
  * Matching runs asynchronously, one state per task, so the legend shows up at once with pending
  * counts; it runs again when a model is loaded or unloaded. Colours are `viewer.setColor`
@@ -26,9 +28,20 @@ import type { ViewerUi } from '../../ui/ViewerUi';
 import { Panel } from '../../ui/Panel';
 import { sortedUnion } from '../../metadata/sortedSets';
 import type { PluginContext, PluginInstance, ViewerPlugin } from '../types';
-import { DEFAULT_COLOR_NAME, colorToHex, parseColor, parseStatusRows, type StatusRow } from './parse';
+import {
+  DEFAULT_COLOR_NAME,
+  STATUS_FILE_EXTENSIONS,
+  colorToHex,
+  isStatusFile,
+  parseColor,
+  parseStatusRows,
+  statusNameOfFile,
+  type ParseStatusOptions,
+  type StatusRow,
+} from './parse';
 
-export type { StatusRow } from './parse';
+export type { ParseStatusOptions, StatusRow } from './parse';
+export { STATUS_FILE_EXTENSIONS, isStatusFile } from './parse';
 
 export interface StatusPluginOptions {
   /** Plugin name (`viewer.getPlugin(name)`). Default 'status'. */
@@ -84,9 +97,17 @@ export interface StatusPlugin extends PluginInstance {
   readonly statuses: readonly Status[];
   /**
    * Adds rows (pasted text or parsed rows) to the legend and schedules the matching. Nothing is
-   * matched synchronously: `await resolve()` for the counts.
+   * matched synchronously: `await resolve()` for the counts. `options.defaultStatus` names the
+   * status of text rows without a status column (default `Default`).
    */
-  add(input: string | readonly StatusRow[]): StatusAddResult;
+  add(input: string | readonly StatusRow[], options?: ParseStatusOptions): StatusAddResult;
+  /**
+   * Reads a row file (`.csv`, `.tsv` or `.txt`: tab, semicolon or comma separated, an optional
+   * `Tag  Status  State  Colour` header) and adds its rows like `add`; rows without a status go
+   * under a status named after the file (`Erection.csv` → `Erection`). The panel calls this for
+   * files dropped on the viewer or the panel and for the "Open…" button.
+   */
+  addFile(file: File): Promise<StatusAddResult>;
   /** Removes a status, removing the colour overrides of its objects. False when there is none. */
   remove(status: string): boolean;
   /** Removes every status (and the colour overrides of their objects). */
@@ -182,8 +203,14 @@ class StatusPluginImpl implements StatusPlugin {
     return out;
   }
 
-  add(input: string | readonly StatusRow[]): StatusAddResult {
-    const rows = typeof input === 'string' ? parseStatusRows(input) : input;
+  async addFile(file: File): Promise<StatusAddResult> {
+    const text = await file.text();
+    if (this.disposed) return { rows: 0, invalidColors: [] };
+    return this.add(text, { defaultStatus: statusNameOfFile(file.name) });
+  }
+
+  add(input: string | readonly StatusRow[], options?: ParseStatusOptions): StatusAddResult {
+    const rows = typeof input === 'string' ? parseStatusRows(input, options) : input;
     const invalidColors: string[] = [];
     let n = 0;
     for (const row of rows) {
@@ -403,7 +430,7 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
   ensureStyles(doc);
   const toggle = ui.addToggle({
     label,
-    title: 'Status legend: paste rows "Tag, Status, State, Colour", match them to the model, select and colour',
+    title: 'Status legend: paste rows "Tag, Status, State, Colour" or drop .csv files, match them to the model, select and colour',
     onClick: () => panel.toggle(),
   });
   const panel = new Panel(ui.element, {
@@ -420,11 +447,60 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
   const input = doc.createElement('textarea');
   input.className = 'mkv-field';
   input.rows = 5;
-  input.placeholder = 'One row per line, tab separated:\nTag\tStatus\tState\tColour\n304-SP001\tErection\tFab\tyellow';
+  input.placeholder =
+    'One row per line, tab separated:\nTag\tStatus\tState\tColour\n304-SP001\tErection\tFab\tyellow\n\nor drop a .csv / .tsv / .txt file here';
   input.title = 'Tag (item name) is mandatory. Status defaults to "Default", State to the tag, Colour to #DDDDDD';
 
   const message = doc.createElement('div');
   message.className = 'mkv-dim';
+
+  // row files: the "Open…" button, files dropped on the panel, and files dropped on the viewer
+  // (claimed from the models panel so they are not loaded as models)
+  const fileExts = STATUS_FILE_EXTENSIONS.map((e) => `.${e}`).join(', ');
+  const addFiles = (files: Iterable<File>): void => {
+    for (const f of files) {
+      plugin.addFile(f).then(
+        (r) => {
+          const bad = r.invalidColors.length > 0 ? `; unknown colour: ${[...new Set(r.invalidColors)].join(', ')} (default used)` : '';
+          message.textContent = `${f.name}: ${r.rows} row${r.rows === 1 ? '' : 's'} added${bad}`;
+          panel.open();
+        },
+        (e: { message?: string }) => {
+          message.textContent = `${f.name}: ${e?.message ?? e}`;
+          panel.open();
+        },
+      );
+    }
+  };
+  const picker = doc.createElement('input');
+  picker.type = 'file';
+  picker.multiple = true;
+  picker.accept = fileExts;
+  picker.hidden = true;
+  picker.onchange = () => {
+    if (picker.files) addFiles(Array.from(picker.files));
+    picker.value = '';
+  };
+  const onDragOver = (e: DragEvent): void => {
+    e.preventDefault();
+  };
+  const onDrop = (e: DragEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.dataTransfer?.files.length) return;
+    const files = Array.from(e.dataTransfer.files);
+    const rows = files.filter((f) => isStatusFile(f.name));
+    const other = files.filter((f) => !isStatusFile(f.name));
+    if (rows.length > 0) addFiles(rows);
+    if (other.length > 0) message.textContent = `Not a row file (${fileExts}): ${other.map((f) => f.name).join(', ')}`;
+  };
+  body.addEventListener('dragover', onDragOver);
+  body.addEventListener('drop', onDrop);
+  const offFiles = ui.models.addFileHandler((f) => {
+    if (!isStatusFile(f.name)) return false;
+    addFiles([f]);
+    return true;
+  });
 
   const button = (text: string, title: string, onClick: () => void): HTMLButtonElement => {
     const b = doc.createElement('button');
@@ -444,6 +520,7 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
       else message.textContent = '';
       if (r.rows > 0) input.value = '';
     }),
+    button('Open…', `Add the rows of ${fileExts} files (also: drop them on the viewer or this panel)`, () => picker.click()),
     button('Colour', 'Colour the objects of every checked status by state', () => {
       if (!plugin.statuses.some((s) => s.checked)) message.textContent = 'Check the statuses to colour first';
       else {
@@ -537,11 +614,14 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
     }
   };
 
-  body.append(input, actions, message, legend);
+  body.append(input, picker, actions, message, legend);
   render();
   const off = plugin.on('changed', render);
   return () => {
     off();
+    offFiles();
+    body.removeEventListener('dragover', onDragOver);
+    body.removeEventListener('drop', onDrop);
     toggle.remove();
     panel.dispose();
   };
