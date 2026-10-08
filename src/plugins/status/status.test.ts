@@ -241,6 +241,27 @@ describe('status plugin: headless API', () => {
     expect(v.getColoredObjects().length).toBe(0);
   });
 
+  it('isolate shows only the checked statuses (hiding or ghosting the rest); showAll undoes it', async () => {
+    const { v, status } = await setup();
+    status.add('P0-0\tS1\tA\tred\nG1\tS1\tB\tblue\nP0-1\tS2\tC\tgreen');
+    await status.resolve();
+    const flags = v.scene.fragments.flags;
+    const count = (bit: number) => Array.from(v.models[0].meshIds()).filter((f) => flags[f] & bit).length;
+    expect(count(1)).toBe(7);
+    status.setChecked('S1', true);
+    status.isolate(); // the checked statuses, others hidden
+    expect([count(1), count(4)]).toEqual([4, 0]); // P0-0 and the 3 leaves of G1
+    v.showAll();
+    status.isolate(['S2'], false); // an explicit list, others ghosted
+    expect([count(1), count(4)]).toEqual([7, 6]);
+    v.showAll();
+    expect([count(1), count(4)]).toEqual([7, 0]);
+    status.setChecked('S1', false);
+    status.isolate(); // nothing checked: nothing to show
+    expect(count(1)).toBe(0);
+    v.showAll();
+  });
+
   it('re-resolves when a model is loaded or unloaded; force re-runs resolved states', async () => {
     const { v, status } = await setup();
     status.add('P0-0\tS\tA\nP1-0\tS\tA');

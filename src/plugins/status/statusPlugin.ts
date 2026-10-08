@@ -125,6 +125,12 @@ export interface StatusPlugin extends PluginInstance {
   select(status: string, state?: string): void;
   /** Colours the objects of every state of these statuses (default: the checked ones). */
   applyColors(statuses?: readonly string[]): void;
+  /**
+   * Shows only the objects of these statuses (default: the checked ones, i.e. the same objects
+   * `applyColors()` colours); everything else is hidden (`hideOthers`, default true) or ghosted.
+   * `viewer.showAll()` undoes it.
+   */
+  isolate(statuses?: readonly string[], hideOthers?: boolean): void;
   /** Removes the colour overrides of these statuses' objects (default: all statuses). */
   resetColors(statuses?: readonly string[]): void;
   on<K extends keyof StatusEvents>(event: K, handler: (payload: StatusEvents[K]) => void): () => void;
@@ -301,6 +307,14 @@ class StatusPluginImpl implements StatusPlugin {
     for (const status of this.pick(names, true)) {
       for (const st of status.states.values()) if (st.objectIds.length > 0) this.viewer.setColor(st.objectIds, st.color);
     }
+  }
+
+  isolate(names?: readonly string[], hideOthers = true): void {
+    let ids: Float64Array = NO_IDS;
+    for (const status of this.pick(names, true)) {
+      for (const st of status.states.values()) ids = ids.length === 0 ? st.objectIds : sortedUnion(ids, st.objectIds);
+    }
+    this.viewer.isolate(ids, hideOthers);
   }
 
   resetColors(names?: readonly string[]): void {
@@ -526,6 +540,13 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
       else {
         message.textContent = '';
         plugin.applyColors();
+      }
+    }),
+    button('Isolate', 'Show only the objects of every checked status (the ones "Colour" colours); hide the rest', () => {
+      if (!plugin.statuses.some((s) => s.checked)) message.textContent = 'Check the statuses to isolate first';
+      else {
+        message.textContent = '';
+        plugin.isolate();
       }
     }),
     button('Reset', 'Remove the colours of every status', () => plugin.resetColors()),
