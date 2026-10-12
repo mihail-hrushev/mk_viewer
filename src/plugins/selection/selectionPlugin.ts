@@ -8,12 +8,14 @@
  *   resolver (`viewer.setSelectionResolver`), so Ctrl / Shift + click adds or removes at the same
  *   level and the context menu acts at it too.
  * - **Parent / Child / Sibling**: move the current selection through the tree. The selection is
- *   read as its *selected nodes*: the topmost nodes whose subtree is entirely selected (a spool
- *   when all its parts are selected, else the parts themselves). Parent selects their parents,
- *   Child their children, Sibling all children of their parents.
+ *   read as its *selected nodes* at the current level: the level node of each selected object
+ *   when all of that node's objects are selected (the spool, at spool level), else the object's
+ *   own node. Parent selects their parents, Child their children, Sibling all children of their
+ *   parents; the nodes an action produced stay the selected nodes until the selection is changed
+ *   from elsewhere.
  *
  *   const viewer = new Viewer(canvas, {
- *     plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Isometric' }] })],
+ *     plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Spools' }] })],
  *   });
  *   const sel = viewer.getPlugin<SelectionPlugin>('selection')!;
  *   sel.setLevel(1);          // clicks now select whole spools
@@ -76,8 +78,10 @@ export interface SelectionPlugin extends PluginInstance {
   /** What a click on this object selects at the current level: the objects under its level node. */
   resolve(objectId: number): Float64Array;
   /**
-   * The selected nodes: the topmost nodes whose subtree is entirely selected, per model. Objects
-   * without a hierarchy node are not listed. Recomputed on every selection change.
+   * The selected nodes: after Parent / Child / Sibling, the nodes the action produced; otherwise
+   * (a click, the tree, `viewer.select`) the current level's node of each selected object when
+   * all of that node's objects are selected, else the object's own node. Objects without a
+   * hierarchy node are not listed.
    */
   readonly nodes: readonly SelectedNode[];
   /** Selects the parents of the selected nodes (a top node stays). */
@@ -163,6 +167,7 @@ class SelectionPluginImpl implements SelectionPlugin {
   setLevel(index: number): void {
     if (!(index >= 0 && index < this.levelList.length) || index === this.levelIndex) return;
     this.levelIndex = Math.floor(index);
+    this.selectedNodes = this.nodesOf(this.viewer.getSelection()); // the same objects, read at the new level
     this.emit();
   }
 
@@ -283,13 +288,31 @@ class SelectionPluginImpl implements SelectionPlugin {
     this.emit();
   }
 
-  /** The topmost nodes whose subtree is entirely in `ids`, per model (`PropertyIndex.nodesOf`). */
+  /**
+   * The selected nodes of `ids` at the current level: each object's level node when its subtree
+   * is entirely in `ids` (it lies under one of the topmost covered nodes, `PropertyIndex.nodesOf`),
+   * else the object's own node. Duplicates dropped, in order of first appearance.
+   */
   private nodesOf(ids: ArrayLike<number>): SelectedNode[] {
     const out: SelectedNode[] = [];
     if (ids.length === 0) return out;
+    const level = this.levelList[this.levelIndex];
     for (const model of this.viewer.models) {
-      const nodes = model.properties.nodesOf(ids);
-      for (let i = 0; i < nodes.length; i++) out.push({ model, node: nodes[i] });
+      const h = model.hierarchy;
+      const covered = new Set(model.properties.nodesOf(ids));
+      if (covered.size === 0) continue;
+      const seen = new Set<number>();
+      for (let i = 0; i < ids.length; i++) {
+        const leaf = h.nodeOfObject(ids[i]);
+        if (leaf < 0) continue;
+        let node = levelNode(model, leaf, level);
+        let full = false;
+        for (let a = node; a >= 0 && !full; a = h.parent(a)) full = covered.has(a);
+        if (!full) node = leaf;
+        if (seen.has(node)) continue;
+        seen.add(node);
+        out.push({ model, node });
+      }
     }
     return out;
   }

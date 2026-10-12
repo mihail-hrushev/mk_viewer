@@ -355,7 +355,7 @@ Properties are searchable. `viewer.findObjects(query)` searches every loaded mod
 queries and the per-model `matches`; `viewer.propertyKeys()` lists the keys there are. Per model,
 `model.properties` has the same `find(query)` plus `keys()`, `values(key)`, `objectsUnder(node)` and
 `nodesOf(objectIds)` (the topmost nodes whose subtree is entirely listed: what the tree highlights
-for a selection, and what the selection plugin's Parent / Child / Sibling start from),
+for a selection),
 and `model.hierarchy.properties(node, inherited)` reads one node's properties (with `inherited`,
 merged with its ancestors'). A query is `{ key, equals | in | startsWith | matches | min / max,
 caseSensitive? }`; the README section [Properties and search](../README.md#properties-and-search)
@@ -682,5 +682,6 @@ the hook the viewer calls after every selecting click to map the picked object t
 selects (its spool, its parent node, ...). A plain click selects the resolved objects, Ctrl / Shift
 adds or removes them as a whole, the context menu acts on them when nothing is selected, and the
 hover highlight stays on the object. One resolver at a time: a plugin that installs one removes it
-in `dispose()`. The plugin also reads the selection as *nodes* (the topmost hierarchy nodes whose
-subtree is entirely selected) to offer Parent / Child / Sibling.
+in `dispose()`. The plugin also reads the selection as *nodes* at the current level (a selected
+object's level node when all its objects are selected, else the object's own node) to offer
+Parent / Child / Sibling.

@@ -708,12 +708,13 @@ root) or the nearest ancestor carrying a property (`key: 'Spool'`; when no ances
 object itself), and a click selects everything under that node. Ctrl / Shift + click adds the
 group, or removes it when all of it was selected, and the right-click menu acts at the same level.
 The defaults are Object, Parent and Top; the models example adds Spool and Iso for the PCF-derived
-spool models. *Selected nodes* shows the selection as nodes: the topmost nodes whose subtree is
-entirely selected (a spool once all its parts are, else the parts), with the object and node counts
-and the first names. *Select* moves the selection through the tree: **Parent** selects the parents
-of the selected nodes, **Child** their children (the same objects, read as finer nodes) and
-**Sibling** all children of their parents, so a few parts become their whole spools, and a spool its
-neighbours. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
+spool models. *Selected nodes* shows the selection as nodes at the current level: a selected
+object's level node once all of that node's objects are selected (the spool, at spool level), else
+the object itself, with the object and node counts and the first names. *Select* moves the
+selection through the tree: **Parent** selects the parents of the selected nodes, **Child** their
+children (the same objects, read as finer nodes) and **Sibling** all children of their parents, so a
+few parts become their whole spools, and a spool its neighbours; the nodes an action produced stay
+the selected nodes until the selection is changed from elsewhere. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
 `child()`, `sibling()`, `on('changed', fn)`; `levelNode(model, node, level)` and `DEFAULT_LEVELS`
 are exported as well. Options: `levels` (`{ label, up?, key? }`), `level` (the initial index),
 `label`, `ui`, `name`. The plugin installs itself as the viewer's selection resolver (see
@@ -721,7 +722,7 @@ are exported as well. Options: `levels` (`{ label, up?, key? }`), `level` (the i
 
 ```ts
 const viewer = new Viewer(canvas, {
-  plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Isometric' }] })],
+  plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Spools' }] })],
 });
 const sel = viewer.getPlugin<SelectionPlugin>('selection')!;
 sel.setLevel(1);   // clicks now select whole spools

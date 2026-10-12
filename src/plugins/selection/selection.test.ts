@@ -144,20 +144,39 @@ describe('selection plugin', () => {
     expect(v.getSelection().length).toBe(1);
   });
 
-  it('selected nodes: the topmost fully selected nodes; Parent, Child, Sibling', async () => {
+  it('selected nodes: the level node when fully selected, else the object; a level change re-reads them', async () => {
     const { v, sel, idOf, names } = await setup();
-    const changes: number[] = [];
-    sel.on('changed', () => changes.push(sel.nodes.length));
     expect(sel.nodes).toEqual([]);
+    // Part level: always the parts
     v.select([idOf('P0-0-0')]);
     expect(names()).toEqual(['P0-0-0']);
-    v.select([idOf('P0-0-0'), idOf('P0-0-1')]); // the whole spool
+    v.select([idOf('P0-0-0'), idOf('P0-0-1')]); // the whole spool, read as parts
+    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
+    // Spool level: the spool once all its parts are selected
+    sel.setLevel(1);
     expect(names()).toEqual(['S0-0']);
     v.select([idOf('P0-0-0'), idOf('P0-0-1'), idOf('P1-1-0')]);
     expect(names()).toEqual(['P1-1-0', 'S0-0']);
-    v.select(v.models[0].objectIds()); // everything: the root
-    expect(names()).toEqual(['R']);
+    v.select([idOf('P0-0-0'), idOf('P1-1-0')]); // no spool complete
+    expect(names()).toEqual(['P0-0-0', 'P1-1-0']);
+    // Iso level: a whole spool is not a whole iso
+    sel.setLevel(2);
+    v.select([idOf('P0-0-0'), idOf('P0-0-1')]);
+    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
+    v.select([idOf('P0-0-0'), idOf('P0-0-1'), idOf('P0-1-0'), idOf('P0-1-1')]);
+    expect(names()).toEqual(['I0']);
+    // Top level with everything selected: the top nodes
+    sel.setLevel(4);
+    v.select(v.models[0].objectIds());
+    expect(names()).toEqual(['I0', 'I1', 'Loose']);
+    sel.setLevel(0);
+    expect(sel.nodes.length).toBe(9);
+  });
 
+  it('Parent, Child, Sibling walk the tree from the selected nodes', async () => {
+    const { v, sel, idOf, names } = await setup();
+    const changes: number[] = [];
+    sel.on('changed', () => changes.push(sel.nodes.length));
     // Parent: parts -> their spool; Child: spool -> parts; Sibling: a part -> the spool's parts
     v.select([idOf('P0-0-0')]);
     sel.parent();
@@ -192,6 +211,18 @@ describe('selection plugin', () => {
     expect(names()).toEqual(['R']);
     expect(changes.length).toBeGreaterThan(10);
 
+    // at spool level a click selects a spool; Child reads it as parts, Sibling as the iso's spools
+    sel.setLevel(1);
+    v.select([]);
+    v.selectPicked({ meshId: 0, objectId: idOf('P1-0-0'), position: [0, 0, 0], distance: 1 }, false);
+    expect(names()).toEqual(['S1-0']);
+    sel.child();
+    expect(names()).toEqual(['P1-0-0', 'P1-0-1']);
+    sel.parent();
+    sel.sibling();
+    expect(names()).toEqual(['S1-0', 'S1-1']);
+    expect(v.getSelection().length).toBe(4);
+
     // the loose mesh is a node of its own under the root
     v.select([idOf('Loose')]);
     sel.sibling();
@@ -214,8 +245,8 @@ describe('selection plugin', () => {
     sel.parent();
     expect(names()).toEqual(['S0-0', 'S0-0']); // one spool in each model
     expect(v.getSelection().length).toBe(4);
-    m2.unload();
-    expect(names()).toEqual(['S0-0']);
+    m2.unload(); // re-read at the current (part) level: the first model's two parts
+    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
   });
 
   it('removing the plugin clears the resolver and the nodes; ui: false skips the panel', async () => {

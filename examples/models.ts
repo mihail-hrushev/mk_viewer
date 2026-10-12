@@ -41,7 +41,7 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
     statusPlugin(),
     setsPlugin(),
     selectionPlugin({
-      levels: [{ label: 'Object' }, { label: 'Parent', up: 1 }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Isometric' }, { label: 'Top', up: Infinity }],
+      levels: [{ label: 'Object' }, { label: 'Parent', up: 1 }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Spools' }, { label: 'Top', up: Infinity }],
     }),
   ],
 });
