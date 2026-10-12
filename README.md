@@ -643,8 +643,10 @@ one receives the tags, a later row with a colour other than the default recolour
 tag listed under two states belongs to both (when both are coloured, the one applied later wins).
 Matching is asynchronous, one state per task, so the legend shows at once with pending counts and
 fills in; it runs again when a model is loaded or unloaded. In the panel: paste the rows and click
-**Add**; every status is a collapsible row with a checkbox, its object count and a trash icon that
-removes it (and its colours); unfolded, it lists its states with a colour swatch and the number of
+**Add**; every status is a collapsible row with a checkbox, its object count and three icons: an
+arrow that selects the objects of all its states (Shift + click adds them to the selection), an eye
+that shows only those objects and hides the rest, and a trash icon that removes the status (and its
+colours); unfolded, it lists its states with a colour swatch and the number of
 matched objects, and clicking a state selects them (Shift + click adds them to the current
 selection). **Colour** colours the objects of every checked
 status by state, **Isolate** shows only those same objects and hides the rest (the toolbar's

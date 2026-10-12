@@ -147,7 +147,7 @@ const CSS = `
 .mkv-status-head:hover{background:#2d3035;border-radius:4px}
 .mkv-status-head input{margin:0 0 0 2px}
 .mkv-status-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.mkv-status-trash{min-width:28px;min-height:28px;padding:0 6px}
+.mkv-status-icon{min-width:28px;min-height:28px;padding:0 6px}
 .mkv-status-states{display:flex;flex-direction:column;padding:0 0 4px 22px}
 .mkv-status-state{display:flex;align-items:center;gap:8px;min-height:26px;padding:0 6px;cursor:pointer;border-radius:4px;user-select:none;-webkit-user-select:none}
 .mkv-status-state:hover{background:#2d3035}
@@ -443,9 +443,12 @@ function ensureStyles(doc: Document): void {
   doc.head.append(st);
 }
 
-const TRASH_SVG =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">' +
-  '<path d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4"/></svg>';
+const SVG_OPEN = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">';
+const TRASH_SVG = SVG_OPEN + '<path d="M2.5 4h11M6 4V2.5h4V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4"/></svg>';
+/** A pointer arrow: select the objects of the status. */
+const SELECT_SVG = SVG_OPEN + '<path d="M3.5 2.5l9.5 5.5-4.3 1.1-2.2 4.2z"/></svg>';
+/** An eye: show only the objects of the status. */
+const ISOLATE_SVG = SVG_OPEN + '<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
 
 function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi, label: string): () => void {
   const doc = ui.element.ownerDocument;
@@ -606,15 +609,26 @@ function createStatusPanel(plugin: StatusPlugin, viewer: ViewerApi, ui: ViewerUi
       count.className = 'mkv-dim';
       count.textContent = pending ? '…' : String(plugin.objectIdsOf(status.name).length);
       count.title = 'Objects matched by the states of this status';
-      const trash = doc.createElement('button');
-      trash.className = 'mkv-btn mkv-outline mkv-status-trash';
-      trash.innerHTML = TRASH_SVG;
-      trash.title = 'Remove this status (and its colours)';
-      trash.onclick = (e) => {
-        e.stopPropagation();
-        plugin.remove(status.name);
+      // icon buttons; their clicks must not fold / unfold the row
+      const icon = (svg: string, title: string, onClick: (e: MouseEvent) => void): HTMLButtonElement => {
+        const b = doc.createElement('button');
+        b.className = 'mkv-btn mkv-outline mkv-status-icon';
+        b.innerHTML = svg;
+        b.title = title;
+        b.onclick = (e) => {
+          e.stopPropagation();
+          onClick(e);
+        };
+        return b;
       };
-      head.append(check, caret, name, count, trash);
+      const select = icon(SELECT_SVG, 'Select the objects of every state of this status (Shift + click: add them to the selection)', (e) =>
+        plugin.select(status.name, undefined, e.shiftKey),
+      );
+      const isolate = icon(ISOLATE_SVG, 'Show only the objects of every state of this status; hide the rest ("Show all" undoes it)', () =>
+        plugin.isolate([status.name]),
+      );
+      const trash = icon(TRASH_SVG, 'Remove this status (and its colours)', () => plugin.remove(status.name));
+      head.append(check, caret, name, count, select, isolate, trash);
       head.onclick = () => {
         if (expanded.has(status.name)) expanded.delete(status.name);
         else expanded.add(status.name);
