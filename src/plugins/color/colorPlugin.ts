@@ -1,12 +1,13 @@
 /**
- * Colour plugin: a context menu entry "Red" that colours the selected objects, and "Reset colour"
- * that gives them their material colour back. Deliberately small; it is the worked example of
- * docs/PLUGIN_API.md and uses only the public plugin contract and `ViewerApi`.
+ * Colour plugin: a context menu submenu "Change colour" listing named colours (with a swatch) that
+ * colour the selected objects, and "Reset colour" that gives them their material colour back.
+ * Deliberately small; it is the worked example of docs/PLUGIN_API.md and uses only the public
+ * plugin contract and `ViewerApi`.
  *
  *   const viewer = new Viewer(canvas, { plugins: [colorPlugin()] });
  *   createViewerUi(viewer);                      // draws the context menu
- *   // right-click an object -> "Red"
- *   viewer.getPlugin<ColorPlugin>('color')!.apply([objectId]);   // or headless
+ *   // right-click an object -> "Change colour" -> "Blue"
+ *   viewer.getPlugin<ColorPlugin>('color')!.apply([objectId], [0, 0, 1]);   // or headless
  *
  * Colours are `viewer.setColor` overrides: they stay when the plugin is removed. "Reset colour"
  * removes the override of the selected objects when one of them is coloured; otherwise, e.g. after
@@ -16,12 +17,40 @@
 import type { Color, ContextMenuContext } from '../../types';
 import type { PluginInstance, ViewerPlugin } from '../types';
 
+/** A named colour of the "Change colour" submenu. */
+export interface NamedColor {
+  /** Label of the submenu entry. */
+  label: string;
+  /** sRGB colour, components in 0..1. */
+  color: Color;
+}
+
+/** The palette the submenu lists by default. */
+export const DEFAULT_COLORS: readonly NamedColor[] = Object.freeze(
+  (
+    [
+      ['Red', [1, 0, 0]],
+      ['Orange', [1, 0.5, 0]],
+      ['Yellow', [1, 0.9, 0]],
+      ['Green', [0, 0.7, 0.2]],
+      ['Cyan', [0, 0.8, 0.9]],
+      ['Blue', [0.1, 0.4, 1]],
+      ['Purple', [0.6, 0.2, 0.9]],
+      ['Magenta', [1, 0.2, 0.7]],
+      ['Grey', [0.5, 0.5, 0.5]],
+      ['White', [1, 1, 1]],
+    ] as [string, Color][]
+  ).map(([label, color]) => Object.freeze({ label, color: Object.freeze(color) as Color })),
+);
+
 export interface ColorPluginOptions {
   /** Plugin name (`viewer.getPlugin(name)`). Default 'color'. */
   name?: string;
-  /** sRGB colour applied by the menu entry. Default red [1, 0, 0]. */
+  /** The colours of the submenu, in this order. Default `DEFAULT_COLORS` (Red, Orange, ..., White). */
+  colors?: NamedColor[];
+  /** The colour `apply()` uses when none is passed. Default: the first of `colors`. */
   color?: Color;
-  /** Label of the menu entry. Default 'Red'. */
+  /** Label of the submenu. Default 'Change colour'. */
   label?: string;
   /** Label of the entry that removes the colour; null for no such entry. Default 'Reset colour'. */
   resetLabel?: string | null;
@@ -31,10 +60,12 @@ export interface ColorPluginOptions {
 
 /** The installed plugin's API (`viewer.getPlugin<ColorPlugin>('color')`). */
 export interface ColorPlugin extends PluginInstance {
-  /** The colour the plugin applies. */
+  /** The colour `apply()` uses by default. */
   readonly color: Color;
-  /** Colours these objects (default: the current selection). */
-  apply(objectIds?: ArrayLike<number>): void;
+  /** The colours of the submenu. */
+  readonly colors: readonly NamedColor[];
+  /** Colours these objects (default: the current selection) with `color` (default: `this.color`). */
+  apply(objectIds?: ArrayLike<number>, color?: Color): void;
   /**
    * Removes the colour override of these objects. Default: the selected objects when one of them
    * is coloured, otherwise every override in the viewer (`viewer.clearColors()`).
@@ -42,10 +73,23 @@ export interface ColorPlugin extends PluginInstance {
   reset(objectIds?: ArrayLike<number>): void;
 }
 
+const checkColor = (color: Color, what: string): Color => {
+  if (!Array.isArray(color) || (color.length !== 3 && color.length !== 4) || !color.every((c) => typeof c === 'number' && c >= 0 && c <= 1)) {
+    throw new RangeError(`color plugin: ${what} must be an [r, g, b] or [r, g, b, a] colour with components in 0..1, got ${color}`);
+  }
+  return color.slice() as Color;
+};
+
 /** Creates the colour plugin. */
 export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<ColorPlugin> {
-  const color: Color = options.color ? (options.color.slice() as Color) : [1, 0, 0];
-  if (!color.every((c) => c >= 0 && c <= 1)) throw new RangeError(`color plugin: colour components must be in 0..1, got ${color}`);
+  const colors: readonly NamedColor[] = Object.freeze(
+    (options.colors ?? DEFAULT_COLORS).map((c, i) => {
+      if (!c || typeof c.label !== 'string') throw new TypeError(`color plugin: colors[${i}] needs a string label`);
+      return Object.freeze({ label: c.label, color: Object.freeze(checkColor(c.color, `colors[${i}].color`)) as Color });
+    }),
+  );
+  if (colors.length === 0 && !options.color) throw new RangeError('color plugin: `colors` is empty and no `color` was given');
+  const color: Color = options.color ? checkColor(options.color, '`color`') : (colors[0].color.slice() as Color);
   return {
     name: options.name ?? 'color',
     install({ viewer, addContextMenuItem }) {
@@ -54,8 +98,8 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
         return false;
       };
 
-      const apply = (ids: ArrayLike<number> = viewer.getSelection()): void => {
-        if (ids.length > 0) viewer.setColor(ids, color);
+      const apply = (ids: ArrayLike<number> = viewer.getSelection(), c: Color = color): void => {
+        if (ids.length > 0) viewer.setColor(ids, c);
       };
       const reset = (ids?: ArrayLike<number>): void => {
         if (ids === undefined) {
@@ -73,12 +117,16 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
       const order = options.order ?? 0;
 
       // owned by the plugin: removed again by viewer.removePlugin() and viewer.dispose()
-      addContextMenuItem({
-        label: options.label ?? 'Red',
-        order,
-        enabled: hasSelection,
-        onClick: (c) => apply(c.selection),
-      });
+      if (colors.length > 0) {
+        addContextMenuItem({
+          label: options.label ?? 'Change colour',
+          title: 'Colour the selected objects',
+          order,
+          enabled: hasSelection,
+          // one entry per colour, with a swatch; the submenu is disabled with nothing selected
+          items: colors.map((c) => ({ label: c.label, color: c.color, onClick: (ctx) => apply(ctx.selection, c.color) })),
+        });
+      }
       const resetLabel = options.resetLabel === undefined ? 'Reset colour' : options.resetLabel;
       if (resetLabel !== null) {
         addContextMenuItem({
@@ -94,6 +142,7 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
         get color() {
           return color.slice() as Color;
         },
+        colors,
         apply,
         reset,
       };

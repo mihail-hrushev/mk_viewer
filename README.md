@@ -584,7 +584,7 @@ optionally with a `ui(ui)` hook (called when the built-in UI exists) and `dispos
 const viewer = new Viewer(canvas, {
   loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
-  // colorPlugin adds "Red" and "Reset colour" to the right-click menu
+  // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
 });
@@ -614,10 +614,13 @@ points (the magnet is larger). Headless: `measure.add(a, b)`, `measure.measureme
 `snapRadius`, `edgeAngle`, `color`. Measurements are in world coordinates: they stay when models
 are hidden or unloaded and do not follow `model.setTransform`.
 
-**Colour** (`colorPlugin`): right-click an object and choose **Red** to colour it (and everything
-else selected); **Reset colour** restores the material colour of the selected objects, or removes
-every colour override (`viewer.clearColors()`, also those set by the application) when no coloured
-object is selected. Headless: `apply(ids?)`, `reset(ids?)`. Options: `color`, `label`, `resetLabel` (null: no reset entry), `order`,
+**Colour** (`colorPlugin`): right-click an object, open **Change colour** and pick one of the named
+colours (Red, Orange, Yellow, Green, Cyan, Blue, Purple, Magenta, Grey, White, each with a swatch) to
+colour it (and everything else selected); **Reset colour** restores the material colour of the
+selected objects, or removes every colour override (`viewer.clearColors()`, also those set by the
+application) when no coloured object is selected. Headless: `apply(ids?, color?)`, `reset(ids?)`,
+`colors`. Options: `colors` (your own `{ label, color }` palette; `DEFAULT_COLORS` is the built-in
+one), `color` (the default of `apply()`), `label`, `resetLabel` (null: no reset entry), `order`,
 `name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 **Status** (`statusPlugin`): the **Status** toolbar button opens a legend of statuses and states
@@ -743,8 +746,9 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   Right-clicking an object that is not selected selects it first (with `autoSelect`); a
   right-button drag still pans. The menu closes on a click outside it, Escape, wheel, scrolling and
   camera movement. Entries are collected by the viewer, so they exist with or without this UI:
-  `viewer.addContextMenuItem({ label, onClick: (c) => ..., enabled?, visible?, order? })` (the
-  callbacks get the selection, the object under the pointer and the position), or the shorter
+  `viewer.addContextMenuItem({ label, onClick: (c) => ..., enabled?, visible?, order?, color? })`
+  (the callbacks get the selection, the object under the pointer and the position; `color` draws
+  a swatch), `{ label, items: [...] }` for a submenu that opens on hover or click, or the shorter
   `ui.addMenuItem({ label, onClick: (selection) => ... })`. To draw your own menu, handle the
   `contextMenu` event and call `req.preventDefault()`.
 - `ui.addToggle({ label, onClick })` adds an on / off toolbar button whose state you set

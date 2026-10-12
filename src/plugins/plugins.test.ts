@@ -4,12 +4,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHeadlessViewer, type HeadlessViewer } from '../__tests__/headlessViewer';
-import type { ToolEndReason, ViewerTool } from '../types';
+import type { ContextMenuEntry, ToolEndReason, ViewerTool } from '../types';
 import type { ViewerUi } from '../ui/ViewerUi';
 import type { ViewerPlugin } from './types';
 import { measurePlugin, type MeasurePlugin, type Measurement } from './measure/measurePlugin';
 import { clipSegment2D, depthCutT, formatDistance, labelOffset } from './measure/geometry';
-import { colorPlugin, type ColorPlugin } from './color/colorPlugin';
+import { colorPlugin, DEFAULT_COLORS, type ColorPlugin } from './color/colorPlugin';
 
 let hv: HeadlessViewer | null = null;
 afterEach(() => {
@@ -380,6 +380,44 @@ describe('context menu', () => {
     expect(() => v.addContextMenuItem({ label: 'x' } as never)).toThrow(/onClick/);
     err.mockRestore();
   });
+
+  it('submenus: items evaluated with the same context, sorted, swatch copied, empty submenu disabled', () => {
+    const { v, hit } = scene({ autoSelect: true });
+    const clicked: string[] = [];
+    v.addContextMenuItem({
+      label: 'Colour',
+      enabled: (c) => c.selection.length > 0,
+      items: [
+        { label: 'b', order: 1, color: [0, 0, 1], onClick: (c) => clicked.push(`b ${c.selection.join('+')}`) },
+        { label: 'a', color: [1, 0, 0, 0.5], onClick: () => clicked.push('a') },
+        { label: 'objects only', visible: (c) => c.hit !== null, items: [{ label: 'deep', onClick: () => clicked.push('deep') }] },
+      ],
+    });
+    v.addContextMenuItem({ label: 'Empty', items: [{ label: 'never', visible: () => false, onClick: () => {} }] });
+    expect(() => v.addContextMenuItem({ label: 'x', items: [{ label: 'y' }] } as never)).toThrow(/onClick/);
+    expect(() => v.addContextMenuItem({ label: 'x', items: 'y' } as never)).toThrow(/onClick/);
+
+    const bg = v.contextMenuAt(0, 0, 'mouse', null);
+    expect(bg.items.map((e) => [e.label, e.enabled, e.items?.length])).toEqual([
+      ['Colour', false, 2],
+      ['Empty', false, 0],
+    ]);
+    bg.items[0].run(); // a submenu entry runs nothing
+    const on = v.contextMenuAt(0, 0, 'mouse', hit(8));
+    const colour = on.items[0];
+    expect(colour.enabled).toBe(true);
+    expect(colour.items!.map((e) => [e.label, e.order, e.color])).toEqual([
+      ['a', 0, [1, 0, 0, 0.5]],
+      ['objects only', 0, undefined],
+      ['b', 1, [0, 0, 1]],
+    ]);
+    expect(colour.items![1].items!.map((e) => e.label)).toEqual(['deep']);
+    expect(Object.isFrozen(colour.items)).toBe(true);
+    colour.items![2].run();
+    colour.items![1].run(); // submenu: no-op
+    colour.items![1].items![0].run();
+    expect(clicked).toEqual(['b 8', 'deep']);
+  });
 });
 
 describe('colour overrides', () => {
@@ -468,18 +506,27 @@ describe('colour plugin', () => {
     v.addMesh({ geometry: geo, material: mat, objectId: 1 });
     v.addMesh({ geometry: geo, material: mat, objectId: 2 });
     const hit = (objectId: number) => ({ meshId: 0, objectId, position: [0, 0, 0] as [number, number, number], distance: 1 });
-    const entries = (h: ReturnType<typeof hit> | null) =>
-      Object.fromEntries(v.contextMenuAt(0, 0, 'mouse', h).items.map((e) => [e.label, e]));
+    // the submenu's colours are flattened in: `Red` is the first entry of "Change colour"
+    const entries = (h: ReturnType<typeof hit> | null) => {
+      const top = v.contextMenuAt(0, 0, 'mouse', h).items;
+      const flat = (list: readonly ContextMenuEntry[]): [string, ContextMenuEntry][] => list.flatMap((e) => [[e.label, e] as [string, ContextMenuEntry], ...flat(e.items ?? [])]);
+      return Object.fromEntries(flat(top));
+    };
 
     let m = entries(null);
-    expect(m.Red.enabled).toBe(false); // nothing selected
+    expect(m['Change colour'].enabled).toBe(false); // nothing selected
+    expect(m.Red.enabled).toBe(true); // the colours themselves are plain; the closed submenu guards them
     expect(m['Reset colour'].enabled).toBe(false);
     m = entries(hit(1)); // selects object 1
-    expect(m.Red.enabled).toBe(true);
+    expect(m['Change colour'].enabled).toBe(true);
+    expect(m['Change colour'].items!.map((e) => e.label)).toEqual(['Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Blue', 'Purple', 'Magenta', 'Grey', 'White']);
+    expect(m.Blue.color).toEqual([0.1, 0.4, 1]);
     expect(m['Reset colour'].enabled).toBe(false);
     m.Red.run();
     expect(v.getColor(1)).toEqual([1, 0, 0, 1]);
     expect(v.getColor(2)).toBeNull();
+    m.Blue.run();
+    expect(v.getColor(1)).toEqual([0.1, 0.4, 1, 1]);
     m = entries(hit(1));
     expect(m['Reset colour'].enabled).toBe(true);
     m['Reset colour'].run();
@@ -488,9 +535,13 @@ describe('colour plugin', () => {
     const p = v.getPlugin<ColorPlugin>('color')!;
     p.apply([2]);
     expect(v.getColor(2)).toEqual([1, 0, 0, 1]);
+    p.apply([2], [0, 1, 0]);
+    expect(v.getColor(2)).toEqual([0, 1, 0, 1]);
     p.reset([2]);
     expect(v.getColor(2)).toBeNull();
     expect(p.color).toEqual([1, 0, 0]);
+    expect(p.colors.map((c) => c.label)).toEqual(DEFAULT_COLORS.map((c) => c.label));
+    expect(p.colors.length).toBe(10);
 
     // the coloured object is no longer selected (a click elsewhere): "Reset colour" still works
     // and removes every colour override in the viewer
@@ -499,7 +550,7 @@ describe('colour plugin', () => {
     p.apply([2]);
     v.select([]);
     m = entries(null);
-    expect(m.Red.enabled).toBe(false);
+    expect(m['Change colour'].enabled).toBe(false);
     expect(m['Reset colour'].enabled).toBe(true);
     m['Reset colour'].run();
     expect(v.getColor(1)).toBeNull();
@@ -541,12 +592,40 @@ describe('colour plugin', () => {
     expect(Object.keys(entries(null))).toEqual([]);
   });
 
-  it('options: colour, labels, no reset entry, name', () => {
-    hv = createHeadlessViewer({ plugins: [colorPlugin({ name: 'paint', color: [0, 0, 1, 0.5], label: 'Blue', resetLabel: null, order: 3 })] });
+  it('options: palette, default colour, labels, no reset entry, name', () => {
+    hv = createHeadlessViewer({
+      plugins: [
+        colorPlugin({
+          name: 'paint',
+          colors: [
+            { label: 'Sky', color: [0.5, 0.8, 1] },
+            { label: 'Glass', color: [0, 0, 1, 0.5] },
+          ],
+          label: 'Paint',
+          resetLabel: null,
+          order: 3,
+        }),
+      ],
+    });
     const items = hv.viewer.contextMenuAt(0, 0, 'mouse', null).items;
-    expect(items.map((e) => [e.label, e.order])).toEqual([['Blue', 3]]);
-    expect(hv.viewer.getPlugin<ColorPlugin>('paint')!.color).toEqual([0, 0, 1, 0.5]);
+    expect(items.map((e) => [e.label, e.order, e.items!.map((s) => [s.label, s.color])])).toEqual([
+      ['Paint', 3, [['Sky', [0.5, 0.8, 1]], ['Glass', [0, 0, 1, 0.5]]]],
+    ]);
+    const p = hv.viewer.getPlugin<ColorPlugin>('paint')!;
+    expect(p.color).toEqual([0.5, 0.8, 1]); // the first palette colour
+    expect(p.colors.map((c) => c.label)).toEqual(['Sky', 'Glass']);
+    expect(Object.isFrozen(p.colors[0].color)).toBe(true);
+
+    // `color` sets the default of apply() independently of the palette; no palette: no submenu
+    const headless = createHeadlessViewer({ plugins: [colorPlugin({ colors: [], color: [0, 0, 1, 0.5] })] });
+    expect(headless.viewer.contextMenuAt(0, 0, 'mouse', null).items.map((e) => e.label)).toEqual(['Reset colour']);
+    expect(headless.viewer.getPlugin<ColorPlugin>('color')!.color).toEqual([0, 0, 1, 0.5]);
+    headless.viewer.dispose();
+
     expect(() => colorPlugin({ color: [2, 0, 0] })).toThrow(/0\.\.1/);
+    expect(() => colorPlugin({ colors: [{ label: 'x', color: [1, 0] as never }] })).toThrow(/colors\[0\]/);
+    expect(() => colorPlugin({ colors: [{ color: [1, 0, 0] } as never] })).toThrow(/label/);
+    expect(() => colorPlugin({ colors: [] })).toThrow(/empty/);
   });
 });
 

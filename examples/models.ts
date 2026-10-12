@@ -6,7 +6,7 @@
  *
  * It is also the reference for registering viewer plugins at startup: the built-in measurement
  * tool (`measurePlugin`, toolbar button "Measure"), the colour plugin (`colorPlugin`, right-click
- * menu entries "Red" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
+ * menu entries "Change colour" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
  * a legend of pasted Tag / Status / State / Colour rows) and a small third-party plugin written
  * against the public API only (./section-plugin.ts, toolbar button "Cut").
  *
@@ -27,7 +27,7 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   up: params.get('up') === 'y' ? 'y' : 'z',
   loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
-  // colorPlugin adds "Red" and "Reset colour" to the right-click menu
+  // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
 });

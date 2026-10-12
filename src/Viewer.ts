@@ -1187,9 +1187,7 @@ export class Viewer implements ViewerApi {
   // context menu
 
   addContextMenuItem(item: ContextMenuItem): () => void {
-    if (!item || typeof item.label !== 'string' || typeof item.onClick !== 'function') {
-      throw new TypeError('mk-viewer: a context menu item needs a string `label` and an `onClick(context)` function');
-    }
+    Viewer.checkMenuItem(item);
     this.menuItems.push(item);
     return () => {
       const i = this.menuItems.indexOf(item);
@@ -1223,8 +1221,34 @@ export class Viewer implements ViewerApi {
       this.select(selection);
     }
     const context: ContextMenuContext = Object.freeze({ x, y, pointerType, hit, selection: Object.freeze(selection) });
+    const entries = Viewer.listMenuEntries(this.menuItems.slice(), context); // callbacks may add / remove items
+    let prevented = false;
+    const req: ContextMenuRequest = {
+      ...context,
+      items: entries,
+      preventDefault: () => {
+        prevented = true;
+      },
+      get defaultPrevented() {
+        return prevented;
+      },
+    };
+    this.emit('contextMenu', req);
+    return req;
+  }
+
+  /** Throws unless `item` is an action (`onClick`) or a submenu (`items`, checked recursively). */
+  private static checkMenuItem(item: ContextMenuItem): void {
+    const ok = !!item && typeof item.label === 'string' && (typeof item.onClick === 'function' || Array.isArray(item.items));
+    if (!ok) {
+      throw new TypeError('mk-viewer: a context menu item needs a string `label` and an `onClick(context)` function or submenu `items`');
+    }
+    if (item.items) for (const sub of item.items) Viewer.checkMenuItem(sub);
+  }
+
+  /** The visible items of one menu level, evaluated for `context` and sorted; submenus recursively. */
+  private static listMenuEntries(items: readonly ContextMenuItem[], context: ContextMenuContext): readonly ContextMenuEntry[] {
     const listed: { item: ContextMenuItem; order: number; seq: number }[] = [];
-    const items = this.menuItems.slice(); // callbacks may add / remove items
     for (let k = 0; k < items.length; k++) {
       const item = items[k];
       let visible = true;
@@ -1237,7 +1261,7 @@ export class Viewer implements ViewerApi {
       if (visible) listed.push({ item, order: Number.isFinite(item.order) ? item.order! : 0, seq: k });
     }
     listed.sort((a, b) => a.order - b.order || a.seq - b.seq);
-    const entries: ContextMenuEntry[] = listed.map(({ item, order }) => {
+    const entries = listed.map(({ item, order }) => {
       let enabled = true;
       try {
         enabled = item.enabled ? item.enabled(context) !== false : true;
@@ -1245,35 +1269,28 @@ export class Viewer implements ViewerApi {
         console.error(`mk-viewer: error in enabled() of context menu item '${item.label}'`, e);
         enabled = false;
       }
-      const entry: ContextMenuEntry = {
+      const sub = item.items ? Viewer.listMenuEntries(item.items.slice(), context) : undefined;
+      if (sub && sub.length === 0) enabled = false; // an empty submenu has nothing to open
+      const onClick = item.onClick;
+      const entry: { -readonly [K in keyof ContextMenuEntry]: ContextMenuEntry[K] } = {
         label: item.label,
         order,
         enabled,
         run: () => {
-          if (!enabled) return;
+          if (!enabled || !onClick || sub) return;
           try {
-            item.onClick(context);
+            onClick.call(item, context);
           } catch (e) {
             console.error(`mk-viewer: error in context menu item '${item.label}'`, e);
           }
         },
       };
-      if (item.title !== undefined) (entry as { title?: string }).title = item.title;
+      if (item.title !== undefined) entry.title = item.title;
+      if (item.color !== undefined) entry.color = item.color.slice() as Color;
+      if (sub) entry.items = sub;
       return Object.freeze(entry);
     });
-    let prevented = false;
-    const req: ContextMenuRequest = {
-      ...context,
-      items: Object.freeze(entries),
-      preventDefault: () => {
-        prevented = true;
-      },
-      get defaultPrevented() {
-        return prevented;
-      },
-    };
-    this.emit('contextMenu', req);
-    return req;
+    return Object.freeze(entries);
   }
 
   get plugins(): readonly string[] {

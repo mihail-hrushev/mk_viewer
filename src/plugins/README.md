@@ -5,7 +5,7 @@ and the built-in plugins:
 
 - `measure/`: `measurePlugin()`, distance measurement with snapping (tool, overlay, toolbar toggle,
   context menu entry);
-- `color/`: `colorPlugin()`, "Red" / "Reset colour" context menu entries (the worked example);
+- `color/`: `colorPlugin()`, "Change colour" submenu of named colours / "Reset colour" context menu entries (the worked example);
 - `status/`: `statusPlugin()`, a legend of statuses and states built from pasted or dropped
   (`.csv` / `.tsv` / `.txt`) `Tag  Status  State  Colour` rows, matched against node names
   (toolbar toggle, panel, async resolution, selection and colour overrides per state, files claimed

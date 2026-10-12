@@ -63,9 +63,13 @@ const CSS = `
 .mkv-menu{position:absolute;min-width:170px;padding:4px;display:flex;flex-direction:column;pointer-events:auto;touch-action:manipulation;
   background:rgba(32,33,36,.97);border:1px solid #3c4043;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
 .mkv-menu[hidden]{display:none}
-.mkv-menu-item{font:inherit;color:inherit;text-align:left;min-height:34px;padding:4px 12px;border:0;border-radius:5px;background:transparent;cursor:pointer;white-space:nowrap}
-.mkv-menu-item:hover:not(:disabled){background:#3c4043}
+.mkv-menu-item{font:inherit;color:inherit;text-align:left;min-height:34px;padding:4px 12px;border:0;border-radius:5px;background:transparent;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:10px}
+.mkv-menu-item:hover:not(:disabled),.mkv-menu-sub[aria-expanded=true]{background:#3c4043}
 .mkv-menu-item:disabled{color:#80868b;cursor:default}
+.mkv-menu-sub::after{content:'›';margin-left:auto;padding-left:16px;color:#9aa0a6;font-size:16px;line-height:1}
+.mkv-menu-swatch{flex:0 0 14px;height:14px;border-radius:3px;border:1px solid rgba(255,255,255,.25)}
+.mkv-menu-item:disabled .mkv-menu-swatch{opacity:.4}
+.mkv-submenu{top:0;left:100%;margin-left:2px}
 .mkv-menu-sep{height:1px;margin:4px 2px;background:#3c4043}
 .mkv-empty{padding:12px;color:#9aa0a6}
 .mkv-panel [hidden]{display:none}

@@ -333,7 +333,10 @@ export interface ContextMenuContext {
   readonly selection: readonly number[];
 }
 
-/** An entry of the canvas context menu (`viewer.addContextMenuItem`, `PluginContext.addContextMenuItem`). */
+/**
+ * An entry of the canvas context menu (`viewer.addContextMenuItem`, `PluginContext.addContextMenuItem`):
+ * either an action (`onClick`) or a submenu (`items`).
+ */
 export interface ContextMenuItem {
   label: string;
   /** Tooltip. */
@@ -341,14 +344,26 @@ export interface ContextMenuItem {
   /**
    * Sort key: lower first, equal keys in registration order. Items of equal `order` form a group;
    * the built-in menu draws a line between groups. The built-in UI's own items use -100. Default 0.
+   * Inside a submenu the key sorts and groups the submenu's own items.
    */
   order?: number;
+  /** A colour swatch drawn before the label (sRGB, 0..1). */
+  color?: Color;
   /** Listed only when this returns true. Default: always listed. */
   visible?(context: ContextMenuContext): boolean;
-  /** Listed but disabled when this returns false. Default: always enabled. */
+  /**
+   * Listed but disabled when this returns false. Default: always enabled. A disabled submenu does
+   * not open.
+   */
   enabled?(context: ContextMenuContext): boolean;
-  /** The item was chosen. */
-  onClick(context: ContextMenuContext): void;
+  /** The item was chosen. Required unless the item is a submenu (`items`). */
+  onClick?(context: ContextMenuContext): void;
+  /**
+   * Makes the item a submenu with these items (same type, so they can nest). Their `visible` and
+   * `enabled` are evaluated with the same context; a submenu whose items are all hidden is listed
+   * but disabled.
+   */
+  items?: ContextMenuItem[];
 }
 
 /** A listed item of a `ContextMenuRequest`, with `visible` / `enabled` already evaluated. */
@@ -357,7 +372,14 @@ export interface ContextMenuEntry {
   readonly title?: string;
   readonly order: number;
   readonly enabled: boolean;
-  /** Calls the item's `onClick` with the request's context (errors are logged); no-op when disabled. */
+  /** See `ContextMenuItem.color`. */
+  readonly color?: Color;
+  /** The listed items of a submenu entry, sorted by `order`; absent on an action entry. */
+  readonly items?: readonly ContextMenuEntry[];
+  /**
+   * Calls the item's `onClick` with the request's context (errors are logged); no-op when disabled
+   * and on a submenu entry.
+   */
   run(): void;
 }
 

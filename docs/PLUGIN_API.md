@@ -234,6 +234,23 @@ interface ContextMenuContext {
   million objects is possible) and free of side effects. Errors are logged and hide / disable the
   entry; an error in `onClick` is logged.
 - `onClick` runs after the menu closed.
+- `color` (sRGB, 0..1) draws a swatch before the label.
+- An entry with `items` instead of `onClick` is a **submenu**: its items are the same type (so they
+  can nest), evaluated with the same context and sorted the same way. The built-in menu opens it on
+  hover or click, beside its row. A disabled submenu does not open, and a submenu whose items are
+  all hidden is listed but disabled. `enabled` of the submenu itself is the place for a condition
+  all its items share (the colour plugin disables **Change colour** with nothing selected):
+
+  ```ts
+  context.addContextMenuItem({
+    label: 'Change colour',
+    enabled: (c) => c.selection.length > 0,
+    items: [
+      { label: 'Red', color: [1, 0, 0], onClick: (c) => viewer.setColor(c.selection, [1, 0, 0]) },
+      { label: 'Blue', color: [0, 0, 1], onClick: (c) => viewer.setColor(c.selection, [0, 0, 1]) },
+    ],
+  });
+  ```
 - Without the built-in UI the entries still exist; the application draws them from the
   `contextMenu` event (below). Applications use `viewer.addContextMenuItem(item)` for their own
   entries (same item type, removed only by the returned function).
@@ -245,7 +262,8 @@ and runs the chosen entry:
 ```ts
 viewer.on('contextMenu', (req) => {
   req.preventDefault();
-  myMenu.show(req.x, req.y, req.items.map((e) => ({ text: e.label, disabled: !e.enabled, choose: () => e.run() })));
+  const rows = (items) => items.map((e) => ({ text: e.label, disabled: !e.enabled, swatch: e.color, children: e.items && rows(e.items), choose: () => e.run() }));
+  myMenu.show(req.x, req.y, rows(req.items));
 });
 ```
 
@@ -378,32 +396,89 @@ callbacks and `ui()` hook, so one plugin cannot break another. Errors in `instal
 ## Walkthrough: the colour plugin
 
 `colorPlugin` (`src/plugins/color/colorPlugin.ts`, exported from the package) is deliberately small:
-it adds **Red** and **Reset colour** to the context menu. The user right-clicks an object (it becomes
-the selection), chooses **Red**, and the object turns red; **Reset colour** gives it its material
-colour back, or, when no coloured object is selected any more, removes every colour override in
-the viewer (`viewer.clearColors()`), whoever set it.
+it adds the submenu **Change colour** (named colours with a swatch) and **Reset colour** to the
+context menu. The user right-clicks an object (it becomes the selection), opens **Change colour** and
+chooses **Blue**, and the object turns blue; **Reset colour** gives it its material colour back, or,
+when no coloured object is selected any more, removes every colour override in the viewer
+(`viewer.clearColors()`), whoever set it.
 Here is the whole plugin:
 
 ```ts
 import type { Color, ContextMenuContext, PluginInstance, ViewerPlugin } from 'mk-viewer';
 
+/** A named colour of the "Change colour" submenu. */
+export interface NamedColor {
+  /** Label of the submenu entry. */
+  label: string;
+  /** sRGB colour, components in 0..1. */
+  color: Color;
+}
+
+/** The palette the submenu lists by default. */
+export const DEFAULT_COLORS: readonly NamedColor[] = Object.freeze(
+  (
+    [
+      ['Red', [1, 0, 0]],
+      ['Orange', [1, 0.5, 0]],
+      ['Yellow', [1, 0.9, 0]],
+      ['Green', [0, 0.7, 0.2]],
+      ['Cyan', [0, 0.8, 0.9]],
+      ['Blue', [0.1, 0.4, 1]],
+      ['Purple', [0.6, 0.2, 0.9]],
+      ['Magenta', [1, 0.2, 0.7]],
+      ['Grey', [0.5, 0.5, 0.5]],
+      ['White', [1, 1, 1]],
+    ] as [string, Color][]
+  ).map(([label, color]) => Object.freeze({ label, color: Object.freeze(color) as Color })),
+);
+
 export interface ColorPluginOptions {
-  name?: string;              // default 'color'
-  color?: Color;              // default [1, 0, 0]
-  label?: string;             // default 'Red'
-  resetLabel?: string | null; // default 'Reset colour'; null: no reset entry
-  order?: number;             // menu group of both entries, default 0
+  /** Plugin name (`viewer.getPlugin(name)`). Default 'color'. */
+  name?: string;
+  /** The colours of the submenu, in this order. Default `DEFAULT_COLORS` (Red, Orange, ..., White). */
+  colors?: NamedColor[];
+  /** The colour `apply()` uses when none is passed. Default: the first of `colors`. */
+  color?: Color;
+  /** Label of the submenu. Default 'Change colour'. */
+  label?: string;
+  /** Label of the entry that removes the colour; null for no such entry. Default 'Reset colour'. */
+  resetLabel?: string | null;
+  /** `ContextMenuItem.order` of both entries (their group in the menu). Default 0. */
+  order?: number;
 }
 
+/** The installed plugin's API (`viewer.getPlugin<ColorPlugin>('color')`). */
 export interface ColorPlugin extends PluginInstance {
+  /** The colour `apply()` uses by default. */
   readonly color: Color;
-  apply(objectIds?: ArrayLike<number>): void; // default: the selection
-  reset(objectIds?: ArrayLike<number>): void; // default: the selection if coloured, else every override
+  /** The colours of the submenu. */
+  readonly colors: readonly NamedColor[];
+  /** Colours these objects (default: the current selection) with `color` (default: `this.color`). */
+  apply(objectIds?: ArrayLike<number>, color?: Color): void;
+  /**
+   * Removes the colour override of these objects. Default: the selected objects when one of them
+   * is coloured, otherwise every override in the viewer (`viewer.clearColors()`).
+   */
+  reset(objectIds?: ArrayLike<number>): void;
 }
 
+const checkColor = (color: Color, what: string): Color => {
+  if (!Array.isArray(color) || (color.length !== 3 && color.length !== 4) || !color.every((c) => typeof c === 'number' && c >= 0 && c <= 1)) {
+    throw new RangeError(`color plugin: ${what} must be an [r, g, b] or [r, g, b, a] colour with components in 0..1, got ${color}`);
+  }
+  return color.slice() as Color;
+};
+
+/** Creates the colour plugin. */
 export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<ColorPlugin> {
-  const color: Color = options.color ? (options.color.slice() as Color) : [1, 0, 0];
-  if (!color.every((c) => c >= 0 && c <= 1)) throw new RangeError(`color plugin: colour components must be in 0..1, got ${color}`);
+  const colors: readonly NamedColor[] = Object.freeze(
+    (options.colors ?? DEFAULT_COLORS).map((c, i) => {
+      if (!c || typeof c.label !== 'string') throw new TypeError(`color plugin: colors[${i}] needs a string label`);
+      return Object.freeze({ label: c.label, color: Object.freeze(checkColor(c.color, `colors[${i}].color`)) as Color });
+    }),
+  );
+  if (colors.length === 0 && !options.color) throw new RangeError('color plugin: `colors` is empty and no `color` was given');
+  const color: Color = options.color ? checkColor(options.color, '`color`') : (colors[0].color.slice() as Color);
   return {
     name: options.name ?? 'color',
     install({ viewer, addContextMenuItem }) {
@@ -412,8 +487,8 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
         return false;
       };
 
-      const apply = (ids: ArrayLike<number> = viewer.getSelection()): void => {
-        if (ids.length > 0) viewer.setColor(ids, color);
+      const apply = (ids: ArrayLike<number> = viewer.getSelection(), c: Color = color): void => {
+        if (ids.length > 0) viewer.setColor(ids, c);
       };
       const reset = (ids?: ArrayLike<number>): void => {
         if (ids === undefined) {
@@ -431,12 +506,16 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
       const order = options.order ?? 0;
 
       // owned by the plugin: removed again by viewer.removePlugin() and viewer.dispose()
-      addContextMenuItem({
-        label: options.label ?? 'Red',
-        order,
-        enabled: hasSelection,
-        onClick: (c) => apply(c.selection),
-      });
+      if (colors.length > 0) {
+        addContextMenuItem({
+          label: options.label ?? 'Change colour',
+          title: 'Colour the selected objects',
+          order,
+          enabled: hasSelection,
+          // one entry per colour, with a swatch; the submenu is disabled with nothing selected
+          items: colors.map((c) => ({ label: c.label, color: c.color, onClick: (ctx) => apply(ctx.selection, c.color) })),
+        });
+      }
       const resetLabel = options.resetLabel === undefined ? 'Reset colour' : options.resetLabel;
       if (resetLabel !== null) {
         addContextMenuItem({
@@ -452,6 +531,7 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
         get color() {
           return color.slice() as Color;
         },
+        colors,
         apply,
         reset,
       };
@@ -463,13 +543,17 @@ export function colorPlugin(options: ColorPluginOptions = {}): ViewerPlugin<Colo
 Step by step:
 
 1. **Factory and options.** `colorPlugin(options)` validates its options when it is called, so a bad
-   colour fails at the call site, not inside the viewer. The plugin object is just `{ name, install }`.
+   colour fails at the call site, not inside the viewer. The palette (`colors`, default
+   `DEFAULT_COLORS`) is frozen so the plugin's API can hand it out as it is. The plugin object is
+   just `{ name, install }`.
 2. **Install.** `install` destructures what it needs from the context: the viewer and
    `addContextMenuItem`. It does not touch the DOM, so it works without the built-in UI and in
    tests.
 3. **Menu entries.** Both entries act on `c.selection`, which is what the user right-clicked (the
    viewer selected it before building the menu) or the existing selection when they right-clicked
-   inside it. **Red** is disabled with nothing selected. **Reset colour** acts on the selection when
+   inside it. **Change colour** is a submenu (`items`, one action per palette colour, `color` for
+   the swatch) and is disabled with nothing selected, so its items need no check of their own.
+   **Reset colour** acts on the selection when
    a selected object has an override (`viewer.getColor`; the check stops at the first coloured one).
    Otherwise, typically because a click elsewhere deselected the coloured object, it removes every
    colour override with `viewer.clearColors()`, also those set by the application or other

@@ -6,7 +6,7 @@
  * It closes on a press outside it, Escape, wheel, page scroll, camera movement and canvas resize.
  * A `contextMenu` handler that calls `preventDefault()` keeps it from showing (to draw your own).
  */
-import type { ContextMenuRequest, ViewerApi } from '../types';
+import type { ContextMenuEntry, ContextMenuRequest, ViewerApi } from '../types';
 
 /**
  * A menu entry in the selection-only form of `ViewerUi.addMenuItem`. For the pointer position and
@@ -120,10 +120,32 @@ export class ContextMenu {
 
   private show(req: ContextMenuRequest): void {
     const el = this.element;
-    const doc = el.ownerDocument;
+    el.replaceChildren(...this.rows(req.items, el));
+    el.hidden = false;
+    // keep the menu inside the canvas
+    const canvas = this.viewer.canvas;
+    el.style.left = `${Math.max(0, Math.min(req.x, canvas.clientWidth - el.offsetWidth - 4))}px`;
+    el.style.top = `${Math.max(0, Math.min(req.y, canvas.clientHeight - el.offsetHeight - 4))}px`;
+  }
+
+  /**
+   * The rows of one menu level: a button per entry, a line between groups. A submenu entry owns a
+   * flyout (`.mkv-submenu`, a child of `menu` so clicks inside it count as inside the menu) that
+   * opens on hover or click and closes when another row of the same level is hovered.
+   */
+  private rows(entries: readonly ContextMenuEntry[], menu: HTMLElement): HTMLElement[] {
+    const doc = menu.ownerDocument;
     const rows: HTMLElement[] = [];
-    let lastOrder = req.items[0].order;
-    for (const entry of req.items) {
+    const subs: { row: HTMLButtonElement; flyout: HTMLElement }[] = [];
+    const closeFlyouts = (except?: HTMLElement): void => {
+      for (const s of subs) {
+        if (s.flyout === except) continue;
+        s.flyout.hidden = true;
+        s.row.setAttribute('aria-expanded', 'false');
+      }
+    };
+    let lastOrder = entries[0].order;
+    for (const entry of entries) {
       if (entry.order !== lastOrder) {
         const sep = doc.createElement('div');
         sep.className = 'mkv-menu-sep';
@@ -134,20 +156,65 @@ export class ContextMenu {
       const b = doc.createElement('button');
       b.className = 'mkv-menu-item';
       b.setAttribute('role', 'menuitem');
-      b.textContent = entry.label;
+      if (entry.color) {
+        const swatch = doc.createElement('span');
+        swatch.className = 'mkv-menu-swatch';
+        const [r, g, bl, a = 1] = entry.color;
+        swatch.style.background = `rgba(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(bl * 255)},${a})`;
+        b.append(swatch);
+      }
+      b.append(doc.createTextNode(entry.label));
       if (entry.title) b.title = entry.title;
       b.disabled = !entry.enabled;
-      b.onclick = () => {
-        this.close();
-        entry.run();
-      };
       rows.push(b);
+      if (!entry.items) {
+        b.onclick = () => {
+          this.close();
+          entry.run();
+        };
+        b.addEventListener('pointerenter', () => closeFlyouts());
+        continue;
+      }
+      b.classList.add('mkv-menu-sub');
+      b.setAttribute('aria-haspopup', 'menu');
+      b.setAttribute('aria-expanded', 'false');
+      const flyout = doc.createElement('div');
+      flyout.className = 'mkv-menu mkv-submenu';
+      flyout.hidden = true;
+      flyout.setAttribute('role', 'menu');
+      if (entry.items.length > 0) flyout.replaceChildren(...this.rows(entry.items, flyout));
+      subs.push({ row: b, flyout });
+      rows.push(flyout);
+      const open = (): void => {
+        if (b.disabled) return;
+        closeFlyouts(flyout);
+        if (!flyout.hidden) return;
+        flyout.hidden = false;
+        b.setAttribute('aria-expanded', 'true');
+        this.placeFlyout(flyout, b);
+      };
+      b.onclick = () => (flyout.hidden ? open() : closeFlyouts());
+      b.addEventListener('pointerenter', (e) => {
+        if (e.pointerType === 'touch') return; // touch: a tap opens it
+        open();
+      });
     }
-    el.replaceChildren(...rows);
-    el.hidden = false;
-    // keep the menu inside the canvas
+    return rows;
+  }
+
+  /** Puts a flyout beside its row: to the right, or to the left when it would leave the canvas. */
+  private placeFlyout(flyout: HTMLElement, row: HTMLElement): void {
     const canvas = this.viewer.canvas;
-    el.style.left = `${Math.max(0, Math.min(req.x, canvas.clientWidth - el.offsetWidth - 4))}px`;
-    el.style.top = `${Math.max(0, Math.min(req.y, canvas.clientHeight - el.offsetHeight - 4))}px`;
+    const menu = row.parentElement!;
+    const menuRect = menu.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const w = flyout.offsetWidth;
+    const h = flyout.offsetHeight;
+    const right = menuRect.right + w <= canvasRect.right - 4 || menuRect.left - w < canvasRect.left + 4;
+    flyout.style.left = right ? `${menu.clientWidth}px` : `${-w}px`;
+    // the row's top, moved up when the flyout would leave the canvas at the bottom
+    const top = row.offsetTop - 4;
+    const maxTop = canvasRect.bottom - menuRect.top - h - 4;
+    flyout.style.top = `${Math.max(-(menuRect.top - canvasRect.top), Math.min(top, maxTop))}px`;
   }
 }
