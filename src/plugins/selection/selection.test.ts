@@ -1,7 +1,7 @@
 /**
  * Selection plugin on the real Viewer (fake GL, a synthetic loader with a three-level hierarchy:
  * root > iso nodes > spool nodes > part meshes): levels and the click resolver, the selected
- * nodes, Parent / Child / Sibling, model changes, disposal. Also the viewer's own
+ * nodes, Parent / Leaf / Sibling, model changes, disposal. Also the viewer's own
  * `setSelectionResolver` click semantics.
  */
 import { afterEach, describe, expect, it } from 'vitest';
@@ -173,11 +173,11 @@ describe('selection plugin', () => {
     expect(sel.nodes.length).toBe(9);
   });
 
-  it('Parent, Child, Sibling walk the tree from the selected nodes', async () => {
+  it('Parent, Leaf, Sibling walk the tree from the selected nodes', async () => {
     const { v, sel, idOf, names } = await setup();
     const changes: number[] = [];
     sel.on('changed', () => changes.push(sel.nodes.length));
-    // Parent: parts -> their spool; Child: spool -> parts; Sibling: a part -> the spool's parts
+    // Parent: parts -> their spool; Leaf: any node -> its parts; Sibling: a part -> the spool's parts
     v.select([idOf('P0-0-0')]);
     sel.parent();
     expect(names()).toEqual(['S0-0']);
@@ -185,12 +185,10 @@ describe('selection plugin', () => {
     sel.parent();
     expect(names()).toEqual(['I0']);
     expect(v.getSelection().length).toBe(4);
-    sel.child();
-    expect(names()).toEqual(['S0-0', 'S0-1']);
-    expect(v.getSelection().length).toBe(4); // the same objects, finer nodes
-    sel.child();
+    sel.leaf(); // straight from the iso to its parts, skipping the spools
     expect(names()).toEqual(['P0-0-0', 'P0-0-1', 'P0-1-0', 'P0-1-1']);
-    sel.child(); // leaves stay
+    expect(v.getSelection().length).toBe(4); // the same objects, read as leaves
+    sel.leaf(); // leaves stay
     expect(names()).toEqual(['P0-0-0', 'P0-0-1', 'P0-1-0', 'P0-1-1']);
     v.select([idOf('P0-0-0'), idOf('P1-0-0')]);
     sel.sibling();
@@ -211,12 +209,12 @@ describe('selection plugin', () => {
     expect(names()).toEqual(['R']);
     expect(changes.length).toBeGreaterThan(10);
 
-    // at spool level a click selects a spool; Child reads it as parts, Sibling as the iso's spools
+    // at spool level a click selects a spool; Leaf reads it as parts, Sibling as the iso's spools
     sel.setLevel(1);
     v.select([]);
     v.selectPicked({ meshId: 0, objectId: idOf('P1-0-0'), position: [0, 0, 0], distance: 1 }, false);
     expect(names()).toEqual(['S1-0']);
-    sel.child();
+    sel.leaf();
     expect(names()).toEqual(['P1-0-0', 'P1-0-1']);
     sel.parent();
     sel.sibling();
@@ -227,11 +225,11 @@ describe('selection plugin', () => {
     v.select([idOf('Loose')]);
     sel.sibling();
     expect(names()).toEqual(['I0', 'I1', 'Loose']);
-    sel.parent(); // nothing selected after Child of nothing: no-op
+    sel.parent(); // nothing selected: the actions are no-ops
     v.select([]);
     expect(sel.nodes).toEqual([]);
     sel.parent();
-    sel.child();
+    sel.leaf();
     sel.sibling();
     expect(v.getSelection()).toEqual([]);
   });

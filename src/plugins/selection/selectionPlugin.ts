@@ -7,12 +7,12 @@
  *   and the click selects everything under that ancestor. Installed as the viewer's selection
  *   resolver (`viewer.setSelectionResolver`), so Ctrl / Shift + click adds or removes at the same
  *   level and the context menu acts at it too.
- * - **Parent / Child / Sibling**: move the current selection through the tree. The selection is
+ * - **Parent / Leaf / Sibling**: move the current selection through the tree. The selection is
  *   read as its *selected nodes* at the current level: the level node of each selected object
  *   when all of that node's objects are selected (the spool, at spool level), else the object's
- *   own node. Parent selects their parents, Child their children, Sibling all children of their
- *   parents; the nodes an action produced stay the selected nodes until the selection is changed
- *   from elsewhere.
+ *   own node. Parent selects their parents, Leaf the objects under them (their own leaf nodes, from
+ *   any depth), Sibling all children of their parents; the nodes an action produced stay the
+ *   selected nodes until the selection is changed from elsewhere.
  *
  *   const viewer = new Viewer(canvas, {
  *     plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Spools' }] })],
@@ -78,7 +78,7 @@ export interface SelectionPlugin extends PluginInstance {
   /** What a click on this object selects at the current level: the objects under its level node. */
   resolve(objectId: number): Float64Array;
   /**
-   * The selected nodes: after Parent / Child / Sibling, the nodes the action produced; otherwise
+   * The selected nodes: after Parent / Leaf / Sibling, the nodes the action produced; otherwise
    * (a click, the tree, `viewer.select`) the current level's node of each selected object when
    * all of that node's objects are selected, else the object's own node. Objects without a
    * hierarchy node are not listed.
@@ -86,8 +86,8 @@ export interface SelectionPlugin extends PluginInstance {
   readonly nodes: readonly SelectedNode[];
   /** Selects the parents of the selected nodes (a top node stays). */
   parent(): void;
-  /** Selects the children of the selected nodes (a leaf stays). */
-  child(): void;
+  /** Selects the objects under the selected nodes as their own (leaf) nodes, from any depth. */
+  leaf(): void;
   /** Selects all children of the selected nodes' parents (the siblings and the nodes themselves). */
   sibling(): void;
   on<K extends keyof SelectionEvents>(event: K, handler: (payload: SelectionEvents[K]) => void): () => void;
@@ -191,12 +191,16 @@ class SelectionPluginImpl implements SelectionPlugin {
     );
   }
 
-  child(): void {
+  leaf(): void {
     const out: SelectedNode[] = [];
     for (const { model, node } of this.selectedNodes) {
-      const ch = model.hierarchy.children(node);
-      if (ch.length === 0) out.push({ model, node });
-      else for (let i = 0; i < ch.length; i++) out.push({ model, node: ch[i] });
+      const h = model.hierarchy;
+      const ids = model.properties.objectsUnder(node);
+      if (ids.length === 0) continue; // a group without objects: nothing to select
+      for (let i = 0; i < ids.length; i++) {
+        const n = h.nodeOfObject(ids[i]);
+        if (n >= 0) out.push({ model, node: n });
+      }
     }
     this.applyNodes(out);
   }
@@ -223,7 +227,7 @@ class SelectionPluginImpl implements SelectionPlugin {
 
   ui(ui: ViewerUi): () => void {
     // the model tree highlights the selected nodes of this plugin (the nodes at the level, or what
-    // Parent / Child / Sibling produced) instead of its own topmost-covered-node reading, so the
+    // Parent / Leaf / Sibling produced) instead of its own topmost-covered-node reading, so the
     // parts of a spool selected one by one or with Sibling show as parts, and a spool click as the spool
     ui.hierarchy.setSelectedNodesProvider(() => this.selectedNodes);
     const offChanged = this.on('changed', () => ui.hierarchy.updateSelection());
@@ -390,9 +394,9 @@ function createSelectionPanel(plugin: SelectionPlugin, viewer: ViewerApi, ui: Vi
   readout.style.whiteSpace = 'pre-wrap';
   const actions = row();
   const parentButton = button('Parent ↑', 'Select the parents of the selected nodes', () => plugin.parent());
-  const childButton = button('Child ↓', 'Select the children of the selected nodes', () => plugin.child());
+  const leafButton = button('Leaf ↓', 'Select the objects under the selected nodes, as their own nodes (the idents of a spool or an iso)', () => plugin.leaf());
   const siblingButton = button('Sibling ↔', 'Select all children of the selected nodes’ parents (the siblings)', () => plugin.sibling());
-  actions.append(parentButton, childButton, siblingButton);
+  actions.append(parentButton, leafButton, siblingButton);
 
   const render = (): void => {
     levelButtons.forEach((b, i) => {
@@ -411,7 +415,7 @@ function createSelectionPanel(plugin: SelectionPlugin, viewer: ViewerApi, ui: Vi
     }
     const none = nodes.length === 0;
     parentButton.disabled = none;
-    childButton.disabled = none;
+    leafButton.disabled = none;
     siblingButton.disabled = none;
   };
 

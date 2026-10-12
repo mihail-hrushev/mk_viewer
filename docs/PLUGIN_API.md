@@ -689,4 +689,4 @@ adds or removes them as a whole, the context menu acts on them when nothing is s
 hover highlight stays on the object. One resolver at a time: a plugin that installs one removes it
 in `dispose()`. The plugin also reads the selection as *nodes* at the current level (a selected
 object's level node when all its objects are selected, else the object's own node) to offer
-Parent / Child / Sibling.
+Parent / Leaf / Sibling.

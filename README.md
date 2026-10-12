@@ -591,7 +591,7 @@ const viewer = new Viewer(canvas, {
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
-  // selectionPlugin adds the "Selection" button: the selection level and Parent / Child / Sibling
+  // selectionPlugin adds the "Selection" button: the selection level and Parent / Leaf / Sibling
   plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin()],
 });
 ```
@@ -711,12 +711,13 @@ The defaults are Object, Parent and Top; the models example adds Spool and Iso f
 spool models. *Selected nodes* shows the selection as nodes at the current level: a selected
 object's level node once all of that node's objects are selected (the spool, at spool level), else
 the object itself, with the object and node counts and the first names. *Select* moves the
-selection through the tree: **Parent** selects the parents of the selected nodes, **Child** their
-children (the same objects, read as finer nodes) and **Sibling** all children of their parents, so a
-few parts become their whole spools, and a spool its neighbours; the nodes an action produced stay
+selection through the tree: **Parent** selects the parents of the selected nodes, **Leaf** the
+objects under them as their own nodes (the idents of a spool or of a whole iso: the same objects,
+read as leaves) and **Sibling** all children of their parents, so a few parts become their whole
+spools, and a spool its neighbours; the nodes an action produced stay
 the selected nodes until the selection is changed from elsewhere. The model tree highlights these
 same nodes while the plugin is installed. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
-`child()`, `sibling()`, `on('changed', fn)`; `levelNode(model, node, level)` and `DEFAULT_LEVELS`
+`leaf()`, `sibling()`, `on('changed', fn)`; `levelNode(model, node, level)` and `DEFAULT_LEVELS`
 are exported as well. Options: `levels` (`{ label, up?, key? }`), `level` (the initial index),
 `label`, `ui`, `name`. The plugin installs itself as the viewer's selection resolver (see
 `setSelectionResolver` below) and removes itself when removed.
