@@ -50,6 +50,26 @@ describe('PropertyIndex edge: preorder and subtree ranges', () => {
     expect(arr(idx.find({ key: 'k', equals: 'x' }).objectIds)).toEqual([10, 11]);
     expect(arr(idx.find({ key: 'k', equals: 'y' }).nodes)).toEqual([1, 2, 3]);
     expect(arr(idx.find({ key: 'k', equals: 'y' }).objectIds)).toEqual([10, 11, 12, 13]);
+    // nodesOf: the topmost nodes whose subtree is entirely listed
+    expect(arr(idx.nodesOf([10, 11, 12, 13]))).toEqual([3]);
+    expect(arr(idx.nodesOf([13, 12, 11, 10, 10]))).toEqual([3]); // order and duplicates do not matter
+    expect(arr(idx.nodesOf([10, 11]))).toEqual([0]);
+    expect(arr(idx.nodesOf([11]))).toEqual([1]);
+    expect(arr(idx.nodesOf([10, 12]))).toEqual([0, 2]); // node 0's child is missing: 0 stands for its own object
+    expect(arr(idx.nodesOf([11, 12]))).toEqual([1, 2]);
+    expect(arr(idx.nodesOf([99]))).toEqual([]);
+    expect(arr(idx.nodesOf([]))).toEqual([]);
+  });
+
+  it('nodesOf with group nodes without objectIds, several roots and a detached subtree', () => {
+    const h = new HierarchyStore();
+    h.addNodes([-1, 0, 0, 1, 1, -1, -2, 6], [NaN, NaN, 3, 4, 5, 6, NaN, 8]);
+    const idx = new PropertyIndexImpl(h);
+    expect(arr(idx.nodesOf([4, 5]))).toEqual([1]); // the group once both its objects are listed
+    expect(arr(idx.nodesOf([3, 4, 5]))).toEqual([0]); // the root
+    expect(arr(idx.nodesOf([4]))).toEqual([3]);
+    expect(arr(idx.nodesOf([3, 4, 5, 6]))).toEqual([0, 5]); // two roots
+    expect(arr(idx.nodesOf([8]))).toEqual([6]); // the detached node's subtree
   });
 
   it('several roots, detached nodes with children, and a second batch', () => {

@@ -94,5 +94,8 @@ describe('TreeModel', () => {
     expect(t.label(row)).toBe('Flange');
     expect(labels(t)).toEqual(['plant.glb', '.Building', '..Level 1', '..Level 2', '...Pump P-202', '....Flange']);
     expect(t.reveal(source, 999)).toBe(-1);
+    expect(t.revealNode(source, source.hierarchy.nodeOfObject(103))).toBe(row);
+    expect(t.revealNode(source, 9999)).toBe(-1);
+    expect(t.revealNode({ name: 'other', hierarchy: source.hierarchy }, 0)).toBe(-1);
   });
 });

@@ -61,6 +61,8 @@ export class PropertyIndexImpl implements PropertyIndex {
   private end = EMPTY_I32;
   private objStart = EMPTY_I32;
   private preObj = EMPTY_F64;
+  /** Objects under each node (lazily, for `nodesOf`). */
+  private totals: Int32Array | null = null;
   private built = false;
 
   constructor(store: HierarchyStore) {
@@ -77,6 +79,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     this.columns.clear();
     this.order = this.pos = this.end = this.objStart = EMPTY_I32;
     this.preObj = EMPTY_F64;
+    this.totals = null;
     this.built = true;
   }
 
@@ -112,6 +115,51 @@ export class PropertyIndexImpl implements PropertyIndex {
     const p = this.pos[node];
     const out = this.preObj.slice(this.objStart[p], this.objStart[this.end[node]]);
     return uniqueSorted(sortIfNeeded(out));
+  }
+
+  nodesOf(objectIds: ArrayLike<number>): Int32Array {
+    this.build();
+    const h = this.store;
+    if (!h || objectIds.length === 0) return new Int32Array(0);
+    const n = h.nodeCount;
+    const totals = this.subtreeTotals(h, n);
+    // how many of the objects lie under each node
+    const counts = new Int32Array(n);
+    const seen = new Uint8Array(n);
+    const leaves: number[] = [];
+    for (let i = 0; i < objectIds.length; i++) {
+      const leaf = h.nodeOfObject(objectIds[i]);
+      if (leaf < 0 || seen[leaf]) continue; // not this model, or the same object twice
+      seen[leaf] = 1;
+      leaves.push(leaf);
+      for (let m = leaf; m >= 0; m = h.parent(m)) counts[m]++;
+    }
+    // climb from each object's node while the parent is entirely covered
+    const out: number[] = [];
+    const taken = new Uint8Array(n);
+    for (const leaf of leaves) {
+      let m = leaf;
+      for (let p = h.parent(m); p >= 0 && counts[p] === totals[p]; p = h.parent(p)) m = p;
+      if (!taken[m]) {
+        taken[m] = 1;
+        out.push(m);
+      }
+    }
+    return Int32Array.from(out).sort();
+  }
+
+  /** Objects under each node, counted the way `nodesOf` counts (one node per objectId). */
+  private subtreeTotals(h: HierarchyStore, n: number): Int32Array {
+    if (this.totals && this.totals.length === n) return this.totals;
+    const t = new Int32Array(n);
+    const oids = h.objectIdColumn();
+    for (let i = 0; i < n; i++) {
+      const id = oids[i];
+      if (id !== id || h.nodeOfObject(id) !== i) continue; // no objectId, or carried by another node too
+      for (let m = i; m >= 0; m = h.parent(m)) t[m]++;
+    }
+    this.totals = t;
+    return t;
   }
 
   find(q: PropertyQuery): PropertyMatch {
@@ -188,7 +236,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     }
     positions.sort();
     const unique = uniqueSortedI32(positions); // one node may carry several matching values
-    return { objectIds: this.expand(unique), nodes: this.nodesOf(unique), values, hits };
+    return { objectIds: this.expand(unique), nodes: this.nodesAt(unique), values, hits };
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -249,7 +297,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     return uniqueSorted(sortIfNeeded(out));
   }
 
-  private nodesOf(positions: Int32Array): Int32Array {
+  private nodesAt(positions: Int32Array): Int32Array {
     const out = new Int32Array(positions.length);
     for (let i = 0; i < positions.length; i++) out[i] = this.order[positions[i]];
     return sortIfNeededI32(out);

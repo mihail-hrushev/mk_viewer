@@ -340,6 +340,12 @@ export interface PropertyIndex {
   values(key: string): string[];
   /** objectIds of a node and everything below it, ascending (what a tree click selects). */
   objectsUnder(node: number): Float64Array;
+  /**
+   * The selected nodes of a set of objects: the topmost nodes whose subtree lies entirely in
+   * `objectIds` (a group once all its objects are listed, else the objects' own nodes), ascending.
+   * Objects of other models are ignored. What the tree highlights for a selection.
+   */
+  nodesOf(objectIds: ArrayLike<number>): Int32Array;
 }
 
 export interface Model {

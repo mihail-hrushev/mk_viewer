@@ -133,12 +133,17 @@ export class TreeModel {
    * when the node is unknown or hidden by the filter.
    */
   reveal(source: TreeSource, objectId: number): number {
+    const node = source.hierarchy.nodeOfObject(objectId);
+    return node < 0 ? -1 : this.revealNode(source, node);
+  }
+
+  /** Expands the ancestors of `node` in `source` and returns its row, or -1 when unknown or filtered out. */
+  revealNode(source: TreeSource, node: number): number {
     const m = this.entries.findIndex((e) => e.source === source);
     if (m < 0) return -1;
     const e = this.entries[m];
     const h = e.source.hierarchy;
-    const node = h.nodeOfObject(objectId);
-    if (node < 0) return -1;
+    if (!(node >= 0 && node < h.nodeCount)) return -1;
     e.open = true;
     for (let p = h.parent(node); p >= 0; p = h.parent(p)) e.expanded[p] = 1;
     this.rebuild();

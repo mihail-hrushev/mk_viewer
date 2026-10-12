@@ -123,8 +123,6 @@ class SelectionPluginImpl implements SelectionPlugin {
   private levelIndex: number;
   private selectedNodes: SelectedNode[] = [];
   private readonly handlers = new Set<() => void>();
-  /** Objects under every node, per model (recomputed when the model's objects change). */
-  private readonly totals = new WeakMap<Model, Int32Array>();
   private readonly offs: (() => void)[];
   /** True while the plugin itself selects: the selection event then keeps its nodes. */
   private selecting = false;
@@ -285,49 +283,13 @@ class SelectionPluginImpl implements SelectionPlugin {
     this.emit();
   }
 
-  /** Objects under each node of the model's hierarchy (counted over the model's objectIds). */
-  private totalsOf(model: Model): Int32Array {
-    let t = this.totals.get(model);
-    if (t) return t;
-    const h = model.hierarchy;
-    t = new Int32Array(h.nodeCount);
-    const ids = model.objectIds();
-    for (let i = 0; i < ids.length; i++) {
-      for (let n = h.nodeOfObject(ids[i]); n >= 0; n = h.parent(n)) t[n]++;
-    }
-    this.totals.set(model, t);
-    return t;
-  }
-
-  /** The topmost nodes whose subtree is entirely in `ids`. */
+  /** The topmost nodes whose subtree is entirely in `ids`, per model (`PropertyIndex.nodesOf`). */
   private nodesOf(ids: ArrayLike<number>): SelectedNode[] {
     const out: SelectedNode[] = [];
     if (ids.length === 0) return out;
-    // per model: how many selected objects lie under each node
-    const counts = new Map<Model, { counts: Int32Array; leaves: number[] }>();
-    for (let i = 0; i < ids.length; i++) {
-      const model = this.viewer.getModelOf(ids[i]);
-      if (!model) continue;
-      const h = model.hierarchy;
-      const leaf = h.nodeOfObject(ids[i]);
-      if (leaf < 0) continue;
-      let entry = counts.get(model);
-      if (!entry) counts.set(model, (entry = { counts: new Int32Array(h.nodeCount), leaves: [] }));
-      entry.leaves.push(leaf);
-      for (let n = leaf; n >= 0; n = h.parent(n)) entry.counts[n]++;
-    }
-    for (const [model, { counts: c, leaves }] of counts) {
-      const h = model.hierarchy;
-      const totals = this.totalsOf(model);
-      const seen = new Set<number>();
-      for (const leaf of leaves) {
-        let n = leaf;
-        for (let p = h.parent(n); p >= 0 && c[p] === totals[p]; p = h.parent(p)) n = p;
-        if (!seen.has(n)) {
-          seen.add(n);
-          out.push({ model, node: n });
-        }
-      }
+    for (const model of this.viewer.models) {
+      const nodes = model.properties.nodesOf(ids);
+      for (let i = 0; i < nodes.length; i++) out.push({ model, node: nodes[i] });
     }
     return out;
   }

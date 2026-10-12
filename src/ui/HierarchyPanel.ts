@@ -15,8 +15,6 @@ const INDENT = 14;
 const FILTER_DELAY_MS = 150;
 /** Rows drawn above and below the visible window. */
 const OVERSCAN = 6;
-/** Canvas selections larger than this are not all highlighted in the tree. */
-const MAX_HIGHLIGHT = 5000;
 const KEY_BASE = 2 ** 32;
 
 function nodeKey(model: number, node: number): number {
@@ -187,21 +185,39 @@ export class HierarchyPanel {
     }
   }
 
-  /** Canvas selection: highlight the nodes of the selected objects and show the first one. */
+  /**
+   * Canvas selection: highlight its selected nodes (a group once all its objects are selected,
+   * else the objects' own nodes; `PropertyIndex.nodesOf`) and show the one holding the first
+   * selected object.
+   */
   private onSelection(ids: number[]): void {
     if (this.selecting) return;
     this.active.clear();
     const sources = this.tree.sources;
-    for (let i = 0; i < ids.length && i < MAX_HIGHLIGHT; i++) {
-      const model = this.viewer.getModelOf(ids[i]);
-      const source = model && this.sources.get(model);
-      const node = source ? source.hierarchy.nodeOfObject(ids[i]) : -1;
-      if (source && node >= 0) this.active.add(nodeKey(sources.indexOf(source), node));
+    const firstModel = ids.length > 0 ? this.viewer.getModelOf(ids[0]) : undefined;
+    let revealSource: TreeSource | undefined;
+    let revealNode = -1;
+    for (const [model, source] of this.sources) {
+      if (ids.length === 0) break;
+      const nodes = model.properties.nodesOf(ids);
+      if (nodes.length === 0) continue;
+      const m = sources.indexOf(source);
+      for (let i = 0; i < nodes.length; i++) this.active.add(nodeKey(m, nodes[i]));
+      if (model === firstModel) {
+        // the selected node above (or at) the first object's node
+        const h = model.hierarchy;
+        const set = new Set(nodes);
+        for (let n = h.nodeOfObject(ids[0]); n >= 0; n = h.parent(n)) {
+          if (set.has(n)) {
+            revealSource = source;
+            revealNode = n;
+            break;
+          }
+        }
+      }
     }
     if (!this.isOpen) return;
-    const model = ids.length > 0 ? this.viewer.getModelOf(ids[0]) : undefined;
-    const source = model && this.sources.get(model);
-    const row = source ? this.tree.reveal(source, ids[0]) : -1;
+    const row = revealSource ? this.tree.revealNode(revealSource, revealNode) : -1;
     if (row < 0) {
       this.draw();
       return;

@@ -353,7 +353,9 @@ objectId ranges, so per-object calls never mix models up.
 Properties are searchable. `viewer.findObjects(query)` searches every loaded model and returns
 `objectIds` (sorted, ready for `select`, `isolate`, `setColor`, `fitToView`), `hits` for list
 queries and the per-model `matches`; `viewer.propertyKeys()` lists the keys there are. Per model,
-`model.properties` has the same `find(query)` plus `keys()`, `values(key)` and `objectsUnder(node)`,
+`model.properties` has the same `find(query)` plus `keys()`, `values(key)`, `objectsUnder(node)` and
+`nodesOf(objectIds)` (the topmost nodes whose subtree is entirely listed: what the tree highlights
+for a selection, and what the selection plugin's Parent / Child / Sibling start from),
 and `model.hierarchy.properties(node, inherited)` reads one node's properties (with `inherited`,
 merged with its ancestors'). A query is `{ key, equals | in | startsWith | matches | min / max,
 caseSensitive? }`; the README section [Properties and search](../README.md#properties-and-search)
