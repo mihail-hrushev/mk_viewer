@@ -228,8 +228,8 @@ interface ContextMenuContext {
 ```
 
 - Entries are sorted by `order`, equal orders in registration order. Equal orders form a group; the
-  built-in menu draws a line between groups. The built-in UI's own entries (Hide selected, Hide
-  unselected, Show all) use -100, so plugin entries (default 0) come after them.
+  built-in menu draws a line between groups. The built-in UI's own entries use -100 (Hide selected, Hide
+  unselected, Show all) and -90 (Properties), so plugin entries (default 0) come after them.
 - `visible` and `enabled` run once per opened menu, synchronously. Keep them cheap (a selection of a
   million objects is possible) and free of side effects. Errors are logged and hide / disable the
   entry; an error in `onClick` is logged.

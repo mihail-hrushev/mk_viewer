@@ -54,7 +54,7 @@ export interface ViewerUi {
   readonly settings: SettingsPanel;
   /**
    * Draws the canvas context menu (`contextMenu` requests of the viewer) and adds its own entries
-   * Hide selected, Hide unselected and Show all (order -100).
+   * Hide selected, Hide unselected and Show all (order -100) and Properties (order -90).
    */
   readonly menu: ContextMenu;
   /** Appends a button to the toolbar and returns it. */
@@ -205,6 +205,14 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
   // hides everything else and keeps the selection, so it can be refined further
   menu.addItem({ label: 'Hide unselected', order: -100, enabled: hasSelection, onClick: (sel) => viewer.isolate(sel, true) });
   menu.addItem({ label: 'Show all', order: -100, onClick: () => viewer.showAll() });
+  // own group (order -90): opens the properties panel for the right-clicked / selected object
+  menu.addItem({
+    label: 'Properties',
+    title: 'Properties of the selected object',
+    order: -90,
+    enabled: hasSelection,
+    onClick: () => properties.open(),
+  });
 
   // viewer plugins: those installed already, and any installed later; a removed plugin's cleanup
   // runs at once

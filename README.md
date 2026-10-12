@@ -738,7 +738,8 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   resizable })` creates more of them for your own content.
 - **Fit** frames the whole scene; **Show all** clears selection, hiding and isolation.
 - A right click on the canvas (long press on touch, where the browser reports one) opens a menu
-  with **Hide selected**, **Hide unselected**, **Show all** and the entries of viewer plugins.
+  with **Hide selected**, **Hide unselected**, **Show all**, **Properties** (opens the properties
+  panel) and the entries of viewer plugins.
   Right-clicking an object that is not selected selects it first (with `autoSelect`); a
   right-button drag still pans. The menu closes on a click outside it, Escape, wheel, scrolling and
   camera movement. Entries are collected by the viewer, so they exist with or without this UI:
