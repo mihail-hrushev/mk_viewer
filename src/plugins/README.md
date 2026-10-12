@@ -12,7 +12,11 @@ and the built-in plugins:
   through `ui.models.addFileHandler`; `parse.ts` holds the row, file name and colour parsing);
 - `sets/`: `setsPlugin()`, a list of saved property searches: a key and typed or pasted values,
   matched with `viewer.findObjects` (toolbar toggle, panel with per-set select / isolate / remove,
-  missing values, async resolution; no colours).
+  missing values, async resolution; no colours);
+- `selection/`: `selectionPlugin()`, the selection level (what a click selects: the object, an
+  ancestor N steps up or the nearest ancestor with a property; installed through
+  `viewer.setSelectionResolver`) and Parent / Child / Sibling over the selected nodes (toolbar
+  toggle, panel).
 
 How to write a viewer plugin (lifecycle, everything a plugin can use, rules, walkthrough) is
 documented in [`docs/PLUGIN_API.md`](../../docs/PLUGIN_API.md). Built-in plugins follow the same

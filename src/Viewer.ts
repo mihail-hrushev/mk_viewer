@@ -58,6 +58,7 @@ import type {
   MeshId,
   MeshParams,
   PickResult,
+  SelectionResolver,
   Primitives,
   ScreenPoint,
   SectionPlane,
@@ -141,6 +142,7 @@ export class Viewer implements ViewerApi {
 
   readonly up: 'y' | 'z';
   private readonly autoSelect: boolean;
+  private selectionResolver: SelectionResolver | null = null;
   private readonly pixelRatio: number | undefined;
 
   // float64 scene origin (camera and core data are relative to it)
@@ -633,6 +635,10 @@ export class Viewer implements ViewerApi {
     // stored as float32 linear: round so that the values given to setColor come back exactly
     const r6 = (x: number): number => Math.round(x * 1e6) / 1e6;
     return [r6(c[0]), r6(c[1]), r6(c[2]), r6(c[3])];
+  }
+
+  setSelectionResolver(resolver: SelectionResolver | null): void {
+    this.selectionResolver = resolver;
   }
 
   select(objectIds: ArrayLike<number>): void {
@@ -1213,10 +1219,11 @@ export class Viewer implements ViewerApi {
    * items, the `contextMenu` event. Used by the unit tests (no GPU pick in node).
    */
   contextMenuAt(x: number, y: number, pointerType: string, hit: PickResult | null): ContextMenuRequest {
-    // the menu acts on the selection; with nothing selected, on the object under the pointer. A
-    // right click never changes the selection (the user may have selected the target by hand).
+    // the menu acts on the selection; with nothing selected, on the object under the pointer (at
+    // the selection level). A right click never changes the selection (the user may have selected
+    // the target by hand).
     let selection = this.scene.getSelection();
-    if (selection.length === 0 && hit) selection = [hit.objectId];
+    if (selection.length === 0 && hit) selection = Array.from(this.resolveClick(hit));
     const context: ContextMenuContext = Object.freeze({ x, y, pointerType, hit, selection: Object.freeze(selection) });
     const entries = Viewer.listMenuEntries(this.menuItems.slice(), context); // callbacks may add / remove items
     let prevented = false;
@@ -1422,6 +1429,7 @@ export class Viewer implements ViewerApi {
   }
 
   dispose(): void {
+    this.selectionResolver = null;
     if (this.disposed || this.disposing) return;
     this.disposing = true;
     // plugins first, in reverse install order, while the viewer still works
@@ -1673,21 +1681,58 @@ export class Viewer implements ViewerApi {
     this.pick(x, y).then((r) => {
       if (this.disposed) return;
       this.emit('pick', r);
-      if (!this.autoSelect) return;
-      const cur = this.scene.getSelection();
-      if (!r) {
-        if (!toggle && cur.length > 0) this.select([]);
-        return;
-      }
-      if (toggle) {
-        const i = cur.indexOf(r.objectId);
-        if (i >= 0) cur.splice(i, 1);
-        else cur.push(r.objectId);
-        this.select(cur);
-      } else if (cur.length !== 1 || cur[0] !== r.objectId) {
-        this.select([r.objectId]);
-      }
+      if (this.autoSelect) this.selectPicked(r, toggle);
     });
+  }
+
+  /**
+   * @internal The selection part of a click (`autoSelect`), after the pick: what the resolver
+   * returns for the hit (the object itself by default) replaces the selection, or, with
+   * `toggle`, is added to it, or removed when all of it was selected. Used by the unit tests
+   * (no GPU pick in node).
+   */
+  selectPicked(hit: PickResult | null, toggle: boolean): void {
+    if (this.disposed) return;
+    const cur = this.scene.getSelection();
+    if (!hit) {
+      if (!toggle && cur.length > 0) this.select([]);
+      return;
+    }
+    const ids = this.resolveClick(hit);
+    if (toggle) {
+      const set = new Set(cur);
+      let allIn = true;
+      for (let i = 0; i < ids.length; i++) if (!set.has(ids[i])) allIn = false;
+      if (allIn) {
+        for (let i = 0; i < ids.length; i++) set.delete(ids[i]);
+        this.select(Array.from(set));
+      } else {
+        const next = cur;
+        for (let i = 0; i < ids.length; i++) if (!set.has(ids[i])) next.push(ids[i]);
+        this.select(next);
+      }
+      return;
+    }
+    if (cur.length === ids.length) {
+      const set = new Set(cur);
+      let same = true;
+      for (let i = 0; i < ids.length && same; i++) if (!set.has(ids[i])) same = false;
+      if (same) return; // already exactly this selection
+    }
+    this.select(ids);
+  }
+
+  /** What a click on `hit` selects: the resolver's answer, or the object itself. */
+  private resolveClick(hit: PickResult): ArrayLike<number> {
+    const r = this.selectionResolver;
+    if (!r) return [hit.objectId];
+    try {
+      const ids = r(hit);
+      return ids ?? [hit.objectId];
+    } catch (e) {
+      console.error('mk-viewer: error in the selection resolver', e);
+      return [hit.objectId];
+    }
   }
 
   /** Hover is for mouse / pen: a touch clears it and suppresses hover picks until it moves away. */

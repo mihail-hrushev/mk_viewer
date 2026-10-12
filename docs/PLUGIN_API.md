@@ -80,7 +80,7 @@ export function pickLogPlugin(): ViewerPlugin {
 ```ts
 import { Viewer, createViewerUi, colorPlugin, measurePlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
 
-const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin()] }); // in this order
+const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin()] }); // in this order
 createViewerUi(viewer);                                         // optional built-in UI
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!;     // a plugin's own API
 viewer.use(pickLogPlugin());                                    // later: returns the instance
@@ -673,3 +673,12 @@ status.applyColors(['Erection']);                           // setColor per stat
 searches (a key and pasted values, `viewer.findObjects` with `in`), each with its count, missing
 values and select / isolate / remove, re-resolved when models change. Read it for the minimal
 version of a panel plugin over an asynchronous headless API.
+
+`selectionPlugin()` (`src/plugins/selection/`) changes what a **click** selects without being a
+tool: it installs a **selection resolver** (`viewer.setSelectionResolver(hit => objectIds | null)`),
+the hook the viewer calls after every selecting click to map the picked object to what the click
+selects (its spool, its parent node, ...). A plain click selects the resolved objects, Ctrl / Shift
+adds or removes them as a whole, the context menu acts on them when nothing is selected, and the
+hover highlight stays on the object. One resolver at a time: a plugin that installs one removes it
+in `dispose()`. The plugin also reads the selection as *nodes* (the topmost hierarchy nodes whose
+subtree is entirely selected) to offer Parent / Child / Sibling.

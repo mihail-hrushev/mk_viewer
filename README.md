@@ -505,6 +505,10 @@ own result. The `objectIds` go straight into the per-object calls:
 ```ts
 const { objectIds, hits } = viewer.findObjects({ key: 'Spool', in: names });
 viewer.select(objectIds);
+// what a click selects: by default the clicked object; a resolver maps it to a group (its spool,
+// its parent node, ...), which a plain click selects and Ctrl / Shift + click adds or removes whole
+viewer.setSelectionResolver((hit) => hit.model?.properties.objectsUnder(hit.model.hierarchy.parent(hit.model.hierarchy.nodeOfObject(hit.objectId))) ?? null);
+viewer.setSelectionResolver(null); // back to the object itself
 viewer.isolate(objectIds);
 viewer.setColor(objectIds, [1, 0.5, 0]);
 viewer.fitToView(objectIds, true);
@@ -587,7 +591,8 @@ const viewer = new Viewer(canvas, {
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
+  // selectionPlugin adds the "Selection" button: the selection level and Parent / Child / Sibling
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin()],
 });
 ```
 
@@ -693,6 +698,34 @@ const batch = sets.add('Batch', '140')!;   // or '140\n141\n142', or ['140', 141
 await sets.resolve();                      // matched against every loaded model
 sets.select(batch.id);                     // the objects whose Batch is 140
 sets.missingValuesOf(batch.id);            // values no model has
+```
+
+**Selection** (`selectionPlugin`): the **Selection** toolbar button opens a small panel that manages
+the selection through the model hierarchy. *Click selects* is the selection level: one button per
+level, the lit one applies to the next click. A level is the clicked object itself, an ancestor a
+fixed number of steps up (`up: 1` the parent, `up: Infinity` the top node just below the model
+root) or the nearest ancestor carrying a property (`key: 'Spool'`; when no ancestor has it, the
+object itself), and a click selects everything under that node. Ctrl / Shift + click adds the
+group, or removes it when all of it was selected, and the right-click menu acts at the same level.
+The defaults are Object, Parent and Top; the models example adds Spool and Iso for the PCF-derived
+spool models. *Selected nodes* shows the selection as nodes: the topmost nodes whose subtree is
+entirely selected (a spool once all its parts are, else the parts), with the object and node counts
+and the first names. *Select* moves the selection through the tree: **Parent** selects the parents
+of the selected nodes, **Child** their children (the same objects, read as finer nodes) and
+**Sibling** all children of their parents, so a few parts become their whole spools, and a spool its
+neighbours. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
+`child()`, `sibling()`, `on('changed', fn)`; `levelNode(model, node, level)` and `DEFAULT_LEVELS`
+are exported as well. Options: `levels` (`{ label, up?, key? }`), `level` (the initial index),
+`label`, `ui`, `name`. The plugin installs itself as the viewer's selection resolver (see
+`setSelectionResolver` below) and removes itself when removed.
+
+```ts
+const viewer = new Viewer(canvas, {
+  plugins: [selectionPlugin({ levels: [{ label: 'Object' }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Isometric' }] })],
+});
+const sel = viewer.getPlugin<SelectionPlugin>('selection')!;
+sel.setLevel(1);   // clicks now select whole spools
+sel.parent();      // the selection grows to the parents of its selected nodes
 ```
 
 ## Controls

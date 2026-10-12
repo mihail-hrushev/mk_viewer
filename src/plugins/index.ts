@@ -21,3 +21,5 @@ export type {
 export { parseStatusRows, parseColor, isStatusFile, NAMED_COLORS, STATUS_FILE_EXTENSIONS } from './status/parse';
 export { setsPlugin, parseSetValues } from './sets/setsPlugin';
 export type { SetsPlugin, SetsPluginOptions, PropertySet, SetsEvents } from './sets/setsPlugin';
+export { selectionPlugin, levelNode, DEFAULT_LEVELS } from './selection/selectionPlugin';
+export type { SelectionPlugin, SelectionPluginOptions, SelectionLevel, SelectedNode, SelectionEvents } from './selection/selectionPlugin';

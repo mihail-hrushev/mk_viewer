@@ -334,6 +334,13 @@ export interface ContextMenuContext {
 }
 
 /**
+ * Maps a clicked object to the objects a click selects (`viewer.setSelectionResolver`): a
+ * selection level plugin returns the object's spool or isometric, for example. Return null for
+ * the default (the object itself). Called per click, so it should be cheap.
+ */
+export type SelectionResolver = (hit: PickResult) => ArrayLike<number> | null;
+
+/**
  * An entry of the canvas context menu (`viewer.addContextMenuItem`, `PluginContext.addContextMenuItem`):
  * either an action (`onClick`) or a submenu (`items`).
  */
@@ -586,6 +593,13 @@ export interface ViewerApi {
   clearColors(): void;
   select(objectIds: ArrayLike<number>): void;
   getSelection(): number[];
+  /**
+   * Installs the function that maps a clicked object to what the click selects (`autoSelect`):
+   * all of it is selected, or, with Ctrl / Shift, added to the selection, or removed when all of
+   * it was selected. Also what the context menu acts on when nothing is selected. One resolver at
+   * a time; null restores the default (the object itself). The hover highlight stays on the object.
+   */
+  setSelectionResolver(resolver: SelectionResolver | null): void;
   showAll(): void;
 
   // --- camera ---

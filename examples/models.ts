@@ -8,7 +8,8 @@
  * tool (`measurePlugin`, toolbar button "Measure"), the colour plugin (`colorPlugin`, right-click
  * menu entries "Change colour" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
  * a legend of pasted Tag / Status / State / Colour rows), the sets plugin (`setsPlugin`, toolbar
- * button "Sets": saved property searches) and a small third-party plugin written
+ * button "Sets": saved property searches), the selection plugin (`selectionPlugin`, toolbar button
+ * "Selection": the selection level and Parent / Child / Sibling) and a small third-party plugin written
  * against the public API only (./section-plugin.ts, toolbar button "Cut").
  *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
@@ -19,7 +20,7 @@
  * (selection x-ray on) and ghost=1 (hidden objects shown faintly); all three are switches of the
  * Settings panel.
  */
-import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
+import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
@@ -31,7 +32,18 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
+  // selectionPlugin adds the "Selection" button: the selection level (what a click selects; the
+  // Spool and Iso levels use the properties of the PCF-derived spool models) and Parent / Child / Sibling
+  plugins: [
+    measurePlugin({ decimals: 3 }),
+    sectionPlugin(),
+    colorPlugin(),
+    statusPlugin(),
+    setsPlugin(),
+    selectionPlugin({
+      levels: [{ label: 'Object' }, { label: 'Parent', up: 1 }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Isometric' }, { label: 'Top', up: Infinity }],
+    }),
+  ],
 });
 // built-in UI: bottom toolbar, movable panels (Tree, Models, Properties, Search, Settings), right-click menu
 const ui = createViewerUi(viewer);
