@@ -21,6 +21,18 @@ function nodeKey(model: number, node: number): number {
   return model * KEY_BASE + node;
 }
 
+/** A node of one model's hierarchy. */
+export interface HierarchyNodeRef {
+  readonly model: Model;
+  readonly node: number;
+}
+
+/**
+ * Decides which nodes the tree highlights for a selection (`HierarchyPanel.setSelectedNodesProvider`).
+ * Called with the selected objectIds; returns nodes of any loaded models.
+ */
+export type SelectedNodesProvider = (objectIds: number[]) => readonly HierarchyNodeRef[];
+
 export class HierarchyPanel {
   readonly tree = new TreeModel();
 
@@ -33,6 +45,8 @@ export class HierarchyPanel {
   private readonly unsubscribe: (() => void)[] = [];
   /** Highlighted nodes, as nodeKey(model index, node). */
   private readonly active = new Set<number>();
+  /** When set, what a selection highlights (the selection plugin: the nodes at its level). */
+  private nodeProvider: SelectedNodesProvider | null = null;
   /** True while a selection made from the tree is being applied (do not reveal it again). */
   private selecting = false;
   private filterTimer = 0;
@@ -98,6 +112,23 @@ export class HierarchyPanel {
 
   toggle(): void {
     this.panel.toggle();
+  }
+
+  /**
+   * Lets a plugin decide which nodes a selection highlights: by default the topmost nodes whose
+   * subtree is entirely selected (`PropertyIndex.nodesOf`); the selection plugin provides the
+   * nodes at its level instead, so a spool selected at spool level and the same parts selected
+   * one by one look different. Null restores the default. The current selection is re-read at
+   * once; call `updateSelection()` when the provider's answer changes without a selection change.
+   */
+  setSelectedNodesProvider(provider: SelectedNodesProvider | null): void {
+    this.nodeProvider = provider;
+    this.updateSelection();
+  }
+
+  /** Re-reads the current selection (its highlighted nodes and the revealed row). */
+  updateSelection(): void {
+    this.onSelection(this.viewer.getSelection());
   }
 
   dispose(): void {
@@ -186,9 +217,9 @@ export class HierarchyPanel {
   }
 
   /**
-   * Canvas selection: highlight its selected nodes (a group once all its objects are selected,
-   * else the objects' own nodes; `PropertyIndex.nodesOf`) and show the one holding the first
-   * selected object.
+   * Canvas selection: highlight its selected nodes (the provider's, else a group once all its
+   * objects are selected and otherwise the objects' own nodes; `PropertyIndex.nodesOf`) and show
+   * the one holding the first selected object.
    */
   private onSelection(ids: number[]): void {
     if (this.selecting) return;
@@ -197,16 +228,29 @@ export class HierarchyPanel {
     const firstModel = ids.length > 0 ? this.viewer.getModelOf(ids[0]) : undefined;
     let revealSource: TreeSource | undefined;
     let revealNode = -1;
+    let provided: readonly HierarchyNodeRef[] | null = null;
+    if (this.nodeProvider && ids.length > 0) {
+      try {
+        provided = this.nodeProvider(ids);
+      } catch (e) {
+        console.error('mk-viewer: error in the selected nodes provider of the model tree', e);
+      }
+    }
     for (const [model, source] of this.sources) {
       if (ids.length === 0) break;
-      const nodes = model.properties.nodesOf(ids);
+      let nodes: ArrayLike<number>;
+      if (provided) {
+        const own: number[] = [];
+        for (const r of provided) if (r.model === model) own.push(r.node);
+        nodes = own;
+      } else nodes = model.properties.nodesOf(ids);
       if (nodes.length === 0) continue;
       const m = sources.indexOf(source);
       for (let i = 0; i < nodes.length; i++) this.active.add(nodeKey(m, nodes[i]));
       if (model === firstModel) {
         // the selected node above (or at) the first object's node
         const h = model.hierarchy;
-        const set = new Set(nodes);
+        const set = new Set(Array.from(nodes));
         for (let n = h.nodeOfObject(ids[0]); n >= 0; n = h.parent(n)) {
           if (set.has(n)) {
             revealSource = source;

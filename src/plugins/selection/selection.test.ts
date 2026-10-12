@@ -258,12 +258,29 @@ describe('selection plugin', () => {
     sel.parent(); // disposed: no-op
     expect(v.getSelection().length).toBe(1);
 
+    // ui: false: no toggle and no panel, but the tree still gets the plugin's nodes
     const s = v.use(selectionPlugin({ ui: false, name: 's2' })) as SelectionPlugin;
     const calls: string[] = [];
-    const fakeUi = { addToggle: () => calls.push('toggle') } as unknown as ViewerUi;
-    const cleanup = s.ui!(fakeUi);
-    expect(calls).toEqual([]);
-    expect(typeof cleanup).toBe('function');
+    let provider: ((ids: number[]) => readonly { node: number }[]) | null = null;
+    const fakeUi = {
+      addToggle: () => calls.push('toggle'),
+      hierarchy: {
+        setSelectedNodesProvider: (p: typeof provider) => {
+          provider = p;
+          calls.push(p ? 'provider' : 'no provider');
+        },
+        updateSelection: () => calls.push('update'),
+      },
+    } as unknown as ViewerUi;
+    const cleanup = s.ui!(fakeUi) as () => void;
+    expect(calls).toEqual(['provider']);
+    expect((provider as unknown as (ids: number[]) => readonly { node: number }[])(v.getSelection()).map((n) => n.node)).toEqual(s.nodes.map((n) => n.node));
+    s.parent();
+    expect(calls).toEqual(['provider', 'update']);
+    cleanup();
+    expect(calls).toEqual(['provider', 'update', 'no provider']);
+    s.parent();
+    expect(calls.length).toBe(3); // unsubscribed
     expect(s.levels.map((l) => l.label)).toEqual(['Object', 'Parent', 'Top']);
   });
 });

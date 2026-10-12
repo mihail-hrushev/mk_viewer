@@ -1,6 +1,6 @@
 export { createViewerUi } from './ViewerUi';
 export type { ViewerUi, ToolbarButton, ToolbarToggle } from './ViewerUi';
-export { HierarchyPanel } from './HierarchyPanel';
+export { HierarchyPanel, type HierarchyNodeRef, type SelectedNodesProvider } from './HierarchyPanel';
 export { ModelsPanel } from './ModelsPanel';
 export { PropertiesPanel } from './PropertiesPanel';
 export { SearchPanel } from './SearchPanel';

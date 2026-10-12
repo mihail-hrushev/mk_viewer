@@ -336,6 +336,11 @@ exists. Put toolbar code in the `ui(ui)` hook:
   registration order, and one that returns true takes the file (it is then not loaded as a model).
   Returns a function that unregisters the handler. The status plugin takes `.csv` / `.tsv` / `.txt`
   row files this way.
+- `ui.hierarchy.setSelectedNodesProvider((objectIds) => nodes)` lets the plugin decide which nodes
+  the model tree highlights for a selection (`{ model, node }` refs); null restores the default
+  (the topmost nodes whose subtree is entirely selected). `ui.hierarchy.updateSelection()` re-reads
+  the selection when the answer changed without a selection change. The selection plugin provides
+  its nodes at the current level this way.
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 

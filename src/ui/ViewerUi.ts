@@ -37,6 +37,10 @@ export interface ViewerUi {
   /** Overlay covering the canvas (pointer-transparent except for its controls). */
   readonly element: HTMLElement;
   readonly toolbar: HTMLElement;
+  /**
+   * Model tree: highlights the selection's nodes and reveals the first; a plugin may decide which
+   * nodes with `hierarchy.setSelectedNodesProvider`.
+   */
   readonly hierarchy: HierarchyPanel;
   /** Models panel: open files, running loads, per-model show / hide / fit / isolate / unload. */
   readonly models: ModelsPanel;

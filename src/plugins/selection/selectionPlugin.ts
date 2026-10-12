@@ -222,9 +222,15 @@ class SelectionPluginImpl implements SelectionPlugin {
   // --- plugin hooks -----------------------------------------------------------------------------
 
   ui(ui: ViewerUi): () => void {
-    if (this.opts.ui === false) return () => {};
-    const cleanup = createSelectionPanel(this, this.viewer, ui, this.opts.label ?? 'Selection');
+    // the model tree highlights the selected nodes of this plugin (the nodes at the level, or what
+    // Parent / Child / Sibling produced) instead of its own topmost-covered-node reading, so the
+    // parts of a spool selected one by one or with Sibling show as parts, and a spool click as the spool
+    ui.hierarchy.setSelectedNodesProvider(() => this.selectedNodes);
+    const offChanged = this.on('changed', () => ui.hierarchy.updateSelection());
+    const cleanup = this.opts.ui === false ? (): void => {} : createSelectionPanel(this, this.viewer, ui, this.opts.label ?? 'Selection');
     const wrapped = (): void => {
+      offChanged();
+      ui.hierarchy.setSelectedNodesProvider(null);
       cleanup();
       if (this.uiCleanup === wrapped) this.uiCleanup = null;
     };

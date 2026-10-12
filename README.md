@@ -714,7 +714,8 @@ the object itself, with the object and node counts and the first names. *Select*
 selection through the tree: **Parent** selects the parents of the selected nodes, **Child** their
 children (the same objects, read as finer nodes) and **Sibling** all children of their parents, so a
 few parts become their whole spools, and a spool its neighbours; the nodes an action produced stay
-the selected nodes until the selection is changed from elsewhere. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
+the selected nodes until the selection is changed from elsewhere. The model tree highlights these
+same nodes while the plugin is installed. Headless: `levels`, `level`, `setLevel(i)`, `resolve(objectId)`, `nodes`, `parent()`,
 `child()`, `sibling()`, `on('changed', fn)`; `levelNode(model, node, level)` and `DEFAULT_LEVELS`
 are exported as well. Options: `levels` (`{ label, up?, key? }`), `level` (the initial index),
 `label`, `ui`, `name`. The plugin installs itself as the viewer's selection resolver (see
