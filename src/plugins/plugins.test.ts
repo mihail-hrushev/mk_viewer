@@ -310,30 +310,37 @@ describe('context menu', () => {
     return { v, hit };
   }
 
-  it('right-clicking an unselected object selects it; inside the selection keeps it; background keeps it', () => {
+  it('acts on the selection, or on the hit object when nothing is selected; never selects', () => {
     const { v, hit } = scene({ autoSelect: true });
     const sel: number[][] = [];
     v.on('selection', (s) => sel.push(s));
+    // nothing selected: the object under the pointer, without selecting it
     let r = v.contextMenuAt(10, 20, 'mouse', hit(7));
     expect(r.selection).toEqual([7]);
-    expect(v.getSelection()).toEqual([7]);
-    v.select([7, 8]);
-    r = v.contextMenuAt(10, 20, 'mouse', hit(8));
-    expect(r.selection).toEqual([7, 8]);
+    expect(v.getSelection()).toEqual([]);
+    // a selection: the selection, also when right-clicking another object
+    v.select([8]);
+    r = v.contextMenuAt(10, 20, 'mouse', hit(7));
+    expect(r.selection).toEqual([8]);
+    expect(r.hit!.objectId).toBe(7);
+    expect(v.getSelection()).toEqual([8]);
     r = v.contextMenuAt(10, 20, 'mouse', null);
-    expect(r.selection).toEqual([7, 8]);
+    expect(r.selection).toEqual([8]);
     expect(r.hit).toBeNull();
     expect([r.x, r.y, r.pointerType]).toEqual([10, 20, 'mouse']);
-    expect(sel).toEqual([[7], [7, 8]]);
-    // while a tool is active, right clicks never select
-    v.setTool({ name: 't' });
+    // background with nothing selected: empty
     v.select([]);
-    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([]);
+    expect(v.contextMenuAt(0, 0, 'mouse', null).selection).toEqual([]);
+    expect(sel).toEqual([[8], []]); // only the explicit select() calls
+    // the same with a tool active and without autoSelect
+    v.setTool({ name: 't' });
+    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([7]);
+    expect(v.getSelection()).toEqual([]);
   });
 
-  it('without autoSelect the selection is left to the application', () => {
+  it('without autoSelect: the same', () => {
     const { v, hit } = scene();
-    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([]);
+    expect(v.contextMenuAt(0, 0, 'mouse', hit(7)).selection).toEqual([7]);
     expect(v.getSelection()).toEqual([]);
   });
 
@@ -403,7 +410,7 @@ describe('context menu', () => {
       ['Empty', false, 0],
     ]);
     bg.items[0].run(); // a submenu entry runs nothing
-    const on = v.contextMenuAt(0, 0, 'mouse', hit(8));
+    const on = v.contextMenuAt(0, 0, 'mouse', hit(8)); // acts on 8 (nothing selected)
     const colour = on.items[0];
     expect(colour.enabled).toBe(true);
     expect(colour.items!.map((e) => [e.label, e.order, e.color])).toEqual([
@@ -517,7 +524,7 @@ describe('colour plugin', () => {
     expect(m['Change colour'].enabled).toBe(false); // nothing selected
     expect(m.Red.enabled).toBe(true); // the colours themselves are plain; the closed submenu guards them
     expect(m['Reset colour'].enabled).toBe(false);
-    m = entries(hit(1)); // selects object 1
+    m = entries(hit(1)); // acts on object 1 (nothing selected)
     expect(m['Change colour'].enabled).toBe(true);
     expect(m['Change colour'].items!.map((e) => e.label)).toEqual(['Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Blue', 'Purple', 'Magenta', 'Grey', 'White']);
     expect(m.Blue.color).toEqual([0.1, 0.4, 1]);

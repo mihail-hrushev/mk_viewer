@@ -743,7 +743,8 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - A right click on the canvas (long press on touch, where the browser reports one) opens a menu
   with **Hide selected**, **Hide unselected**, **Show all**, **Properties** (opens the properties
   panel) and the entries of viewer plugins.
-  Right-clicking an object that is not selected selects it first (with `autoSelect`); a
+  The entries act on the selection, or on the object under the pointer when nothing is selected;
+  a right click never changes the selection, so select first and right-click anywhere. A
   right-button drag still pans. The menu closes on a click outside it, Escape, wheel, scrolling and
   camera movement. Entries are collected by the viewer, so they exist with or without this UI:
   `viewer.addContextMenuItem({ label, onClick: (c) => ..., enabled?, visible?, order?, color? })`

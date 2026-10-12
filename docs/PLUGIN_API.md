@@ -137,7 +137,7 @@ parts plugins typically need are below.
 | --- | --- | --- |
 | `pick` | `PickResult \| null` | a click / tap selected (or hit the background); not while a tool is active |
 | `hover` | `PickResult \| null` | the object under the mouse / pen changed (only with `autoSelect` or a listener) |
-| `selection` | `number[]` | the selection changed (`select`, clicks, the tree, right click) |
+| `selection` | `number[]` | the selection changed (`select`, clicks, the tree) |
 | `camera` | `CameraState` | the camera moved (world coordinates) |
 | `view` | `{ width, height }` | camera or canvas size changed; inside the animation frame, before the image is shown |
 | `frameComplete` | `ViewerStats` | the progressive image is complete |
@@ -194,9 +194,10 @@ the end of a right-button pan** (and a long press on touch, where the browser re
 
 1. If a tool is active and its `onContextMenu` returns true, the right click is consumed and nothing
    else happens.
-2. The viewer picks under the pointer. If the object there is not selected, it becomes the selection
-   (only with `autoSelect` and no active tool). Right-clicking inside the selection or on the
-   background keeps the selection.
+2. The viewer picks under the pointer. The menu acts on the selection (`c.selection`), or on the
+   object under the pointer when nothing is selected. The selection itself is never changed by a
+   right click, so the user can select by hand and right-click anywhere, including over another
+   object.
 3. Every entry's `visible` and `enabled` are evaluated with the resulting `ContextMenuContext`, and
    the `contextMenu` event is emitted with the listed entries.
 4. The built-in UI shows them (unless a handler called `preventDefault()`), and closes the menu on a
@@ -397,7 +398,7 @@ callbacks and `ui()` hook, so one plugin cannot break another. Errors in `instal
 
 `colorPlugin` (`src/plugins/color/colorPlugin.ts`, exported from the package) is deliberately small:
 it adds the submenu **Change colour** (named colours with a swatch) and **Reset colour** to the
-context menu. The user right-clicks an object (it becomes the selection), opens **Change colour** and
+context menu. The user selects an object (or just right-clicks one), opens **Change colour** and
 chooses **Blue**, and the object turns blue; **Reset colour** gives it its material colour back, or,
 when no coloured object is selected any more, removes every colour override in the viewer
 (`viewer.clearColors()`), whoever set it.
@@ -549,9 +550,8 @@ Step by step:
 2. **Install.** `install` destructures what it needs from the context: the viewer and
    `addContextMenuItem`. It does not touch the DOM, so it works without the built-in UI and in
    tests.
-3. **Menu entries.** Both entries act on `c.selection`, which is what the user right-clicked (the
-   viewer selected it before building the menu) or the existing selection when they right-clicked
-   inside it. **Change colour** is a submenu (`items`, one action per palette colour, `color` for
+3. **Menu entries.** Both entries act on `c.selection`: the selection, or the object the user
+   right-clicked when nothing is selected (the viewer does not select it). **Change colour** is a submenu (`items`, one action per palette colour, `color` for
    the swatch) and is disabled with nothing selected, so its items need no check of their own.
    **Reset colour** acts on the selection when
    a selected object has an override (`viewer.getColor`; the check stops at the first coloured one).

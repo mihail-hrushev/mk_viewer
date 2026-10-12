@@ -326,9 +326,9 @@ export interface ContextMenuContext {
   /** The object under the pointer, or null on the background. */
   readonly hit: PickResult | null;
   /**
-   * The objects the menu acts on (objectIds): the selection after the right click. Right-clicking an
-   * object outside the selection selects it first (unless `autoSelect` is off or a tool is active),
-   * so this is usually what the user pointed at. May be empty.
+   * The objects the menu acts on (objectIds): the selection, or, when nothing is selected, the
+   * object under the pointer. A right click never changes the selection. May be empty (right click
+   * on the background with nothing selected).
    */
   readonly selection: readonly number[];
 }
@@ -725,9 +725,9 @@ export interface ViewerApi {
    */
   addContextMenuItem(item: ContextMenuItem): () => void;
   /**
-   * Opens the context menu as a right click at canvas CSS pixel (x, y) would: picks, selects the
-   * object under the point when it is not selected (see `ContextMenuContext.selection`) and emits
-   * `contextMenu`. Resolves with the emitted request, or null when superseded by a newer request.
+   * Opens the context menu as a right click at canvas CSS pixel (x, y) would: picks under the point
+   * (see `ContextMenuContext.selection`; the selection is not changed) and emits `contextMenu`.
+   * Resolves with the emitted request, or null when superseded by a newer request.
    */
   openContextMenu(x: number, y: number, pointerType?: string): Promise<ContextMenuRequest | null>;
 

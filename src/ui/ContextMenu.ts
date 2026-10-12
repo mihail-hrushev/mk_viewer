@@ -1,7 +1,7 @@
 /**
  * The built-in context menu: draws the viewer's context menu requests (`contextMenu` event) over
  * the canvas. The viewer decides when a menu is wanted (a right click that was not a pan, a long
- * press on touch, `openContextMenu`), selects what was right-clicked and collects the items
+ * press on touch, `openContextMenu`), picks what was right-clicked and collects the items
  * (`viewer.addContextMenuItem`, `PluginContext.addContextMenuItem`); this class only shows them.
  * It closes on a press outside it, Escape, wheel, page scroll, camera movement and canvas resize.
  * A `contextMenu` handler that calls `preventDefault()` keeps it from showing (to draw your own).

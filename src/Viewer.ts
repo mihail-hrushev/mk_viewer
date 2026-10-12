@@ -1209,17 +1209,14 @@ export class Viewer implements ViewerApi {
   }
 
   /**
-   * @internal The part of `openContextMenu` after the pick: select-on-right-click, collecting the
+   * @internal The part of `openContextMenu` after the pick: the target objects, collecting the
    * items, the `contextMenu` event. Used by the unit tests (no GPU pick in node).
    */
   contextMenuAt(x: number, y: number, pointerType: string, hit: PickResult | null): ContextMenuRequest {
+    // the menu acts on the selection; with nothing selected, on the object under the pointer. A
+    // right click never changes the selection (the user may have selected the target by hand).
     let selection = this.scene.getSelection();
-    // a right click on an object outside the selection acts on that object (not while a tool is
-    // active: clicks never select then)
-    if (hit && this.autoSelect && !this.tool && !selection.includes(hit.objectId)) {
-      selection = [hit.objectId];
-      this.select(selection);
-    }
+    if (selection.length === 0 && hit) selection = [hit.objectId];
     const context: ContextMenuContext = Object.freeze({ x, y, pointerType, hit, selection: Object.freeze(selection) });
     const entries = Viewer.listMenuEntries(this.menuItems.slice(), context); // callbacks may add / remove items
     let prevented = false;

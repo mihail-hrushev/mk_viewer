@@ -205,13 +205,17 @@ export function createViewerUi(viewer: ViewerApi): ViewerUi {
   // hides everything else and keeps the selection, so it can be refined further
   menu.addItem({ label: 'Hide unselected', order: -100, enabled: hasSelection, onClick: (sel) => viewer.isolate(sel, true) });
   menu.addItem({ label: 'Show all', order: -100, onClick: () => viewer.showAll() });
-  // own group (order -90): opens the properties panel for the right-clicked / selected object
+  // own group (order -90): opens the properties panel; it shows the first selected object, so the
+  // right-clicked object is selected first when nothing was
   menu.addItem({
     label: 'Properties',
     title: 'Properties of the selected object',
     order: -90,
     enabled: hasSelection,
-    onClick: () => properties.open(),
+    onClick: (sel) => {
+      if (viewer.getSelection().length === 0) viewer.select(sel);
+      properties.open();
+    },
   });
 
   // viewer plugins: those installed already, and any installed later; a removed plugin's cleanup
