@@ -7,7 +7,8 @@
  * It is also the reference for registering viewer plugins at startup: the built-in measurement
  * tool (`measurePlugin`, toolbar button "Measure"), the colour plugin (`colorPlugin`, right-click
  * menu entries "Change colour" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
- * a legend of pasted Tag / Status / State / Colour rows) and a small third-party plugin written
+ * a legend of pasted Tag / Status / State / Colour rows), the sets plugin (`setsPlugin`, toolbar
+ * button "Sets": saved property searches) and a small third-party plugin written
  * against the public API only (./section-plugin.ts, toolbar button "Cut").
  *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
@@ -18,7 +19,7 @@
  * (selection x-ray on) and ghost=1 (hidden objects shown faintly); all three are switches of the
  * Settings panel.
  */
-import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, statusPlugin, type MeasurePlugin } from '../src/index';
+import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
@@ -29,7 +30,8 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
+  // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
 });
 // built-in UI: bottom toolbar, movable panels (Tree, Models, Properties, Search, Settings), right-click menu
 const ui = createViewerUi(viewer);

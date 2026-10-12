@@ -586,7 +586,8 @@ const viewer = new Viewer(canvas, {
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
+  // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
 });
 ```
 
@@ -668,6 +669,30 @@ status.add('304-SP001\tErection\tFab\tyellow\n440-SP003\tErection\tErected\t#00f
 await status.resolve();            // matched against every loaded model
 status.select('Erection', 'Fab');  // the objects of one state
 status.applyColors(['Erection']);  // colour every state of the status
+```
+
+**Sets** (`setsPlugin`): the **Sets** toolbar button opens a list of saved property searches. Choose
+a property key (every key of the loaded models, `name` for the node names), type or paste the
+values (one per line, a spreadsheet column, or comma / semicolon separated) and click **Add**
+(Ctrl+Enter in the box does the same): the values are looked up under the key with
+`viewer.findObjects`, case-insensitive, and the result becomes a row `Batch = 140` or
+`Batch in 12 values` with its object count. A value that matches a group node matches its whole
+subtree. Clicking a row selects its objects (Shift + click adds them to the selection); the row's
+icons select, show only those objects (hiding the rest; **Show all** undoes it) or remove the set,
+and values no model has are listed under the row. **Fit** frames the selection, **Clear** removes
+every set. A set keeps its query, not its result: matching is asynchronous, one set per task, and
+runs again when a model is loaded or unloaded. No colours are involved. Headless: `add(key, text |
+values)` (returns the set or null), `await resolve()`, `sets`, `objectIdsOf(id)`,
+`missingValuesOf(id)`, `select(id, add?)`, `isolate(ids?, hideOthers = true)` (default: all sets),
+`remove(id)`, `clear()`, `on('changed', fn)`; `parseSetValues(text)` is exported as well. Options:
+`label`, `ui` (false: no button and no panel), `name`.
+
+```ts
+const sets = viewer.getPlugin<SetsPlugin>('sets')!;
+const batch = sets.add('Batch', '140')!;   // or '140\n141\n142', or ['140', 141]
+await sets.resolve();                      // matched against every loaded model
+sets.select(batch.id);                     // the objects whose Batch is 140
+sets.missingValuesOf(batch.id);            // values no model has
 ```
 
 ## Controls

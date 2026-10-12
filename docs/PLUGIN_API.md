@@ -78,9 +78,9 @@ export function pickLogPlugin(): ViewerPlugin {
 **Registering.** An application installs plugins when it creates the viewer, or later:
 
 ```ts
-import { Viewer, createViewerUi, colorPlugin, measurePlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
+import { Viewer, createViewerUi, colorPlugin, measurePlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
 
-const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin()] }); // in this order
+const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin()] }); // in this order
 createViewerUi(viewer);                                         // optional built-in UI
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!;     // a plugin's own API
 viewer.use(pickLogPlugin());                                    // later: returns the instance
@@ -579,7 +579,7 @@ Registering it, as [`examples/models.ts`](../examples/models.ts) does (try it on
 
 ```ts
 const viewer = new Viewer(canvas, {
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin()],
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
 });
 const ui = createViewerUi(viewer); // draws the context menu
 ```
@@ -668,3 +668,8 @@ status.statuses[0].states[0].hits;                          // Int32Array, match
 status.select('Erection', 'Fab');                           // viewer.select(objectIdsOf(...))
 status.applyColors(['Erection']);                           // setColor per state; remove() undoes it
 ```
+
+`setsPlugin()` (`src/plugins/sets/`) is the same shape without colours: a list of saved property
+searches (a key and pasted values, `viewer.findObjects` with `in`), each with its count, missing
+values and select / isolate / remove, re-resolved when models change. Read it for the minimal
+version of a panel plugin over an asynchronous headless API.

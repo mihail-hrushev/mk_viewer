@@ -19,3 +19,5 @@ export type {
   ParseStatusOptions,
 } from './status/statusPlugin';
 export { parseStatusRows, parseColor, isStatusFile, NAMED_COLORS, STATUS_FILE_EXTENSIONS } from './status/parse';
+export { setsPlugin, parseSetValues } from './sets/setsPlugin';
+export type { SetsPlugin, SetsPluginOptions, PropertySet, SetsEvents } from './sets/setsPlugin';
