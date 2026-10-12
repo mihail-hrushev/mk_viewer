@@ -491,7 +491,11 @@ function createSetsPanel(plugin: SetsPlugin, viewer: ViewerApi, ui: ViewerUi, la
     }
   };
 
-  body.append(keySelect, input, actions, message, list);
+  // in a row, like the Search panel: a bare select would stretch to fill the column
+  const keyLine = doc.createElement('div');
+  keyLine.className = 'mkv-line';
+  keyLine.append(keySelect);
+  body.append(keyLine, input, actions, message, list);
   fillKeys();
   render();
   const offs = [plugin.on('changed', render), viewer.on('modelLoaded', fillKeys), viewer.on('modelUnloaded', fillKeys)];
