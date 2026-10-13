@@ -708,9 +708,10 @@ root) or the nearest ancestor carrying a property (`key: 'Spool'`; when no ances
 object itself), and a click selects everything under that node. Ctrl / Shift + click adds the
 group, or removes it when all of it was selected, and the right-click menu acts at the same level.
 The defaults are Object, Parent and Top; the models example adds Spool and Iso for the PCF-derived
-spool models. *Selected nodes* shows the selection as nodes at the current level: a selected
-object's level node once all of that node's objects are selected (the spool, at spool level), else
-the object itself, with the object and node counts and the first names. *Select* moves the
+spool models. *Selected nodes* shows the selection as nodes, following where it came from: a click
+gives its level node (the spool, at spool level), a click in the model tree the clicked rows, and
+anything else (Search, Sets, Status, `viewer.select`) the topmost nodes whose subtree is entirely
+selected; shown with the object and node counts and the first names. *Select* moves the
 selection through the tree: **Parent** selects the parents of the selected nodes, **Child** their
 children one level down (the spools of the selected isos; again: their idents), **Leaf** the
 objects under them as their own nodes (the idents of a spool or of a whole iso at once: the same

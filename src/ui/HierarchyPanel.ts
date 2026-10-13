@@ -47,6 +47,8 @@ export class HierarchyPanel {
   private readonly active = new Set<number>();
   /** When set, what a selection highlights (the selection plugin: the nodes at its level). */
   private nodeProvider: SelectedNodesProvider | null = null;
+  /** Told which rows a tree click selected (`onNodeSelection`). */
+  private readonly nodeHandlers = new Set<(nodes: readonly HierarchyNodeRef[]) => void>();
   /** True while a selection made from the tree is being applied (do not reveal it again). */
   private selecting = false;
   private filterTimer = 0;
@@ -131,6 +133,18 @@ export class HierarchyPanel {
     this.onSelection(this.viewer.getSelection());
   }
 
+  /**
+   * Calls `handler` with the rows a click in the tree selected (all highlighted rows after a
+   * Shift / Ctrl + click; empty when a model row cleared the selection), right after the viewer's
+   * `selection` event. The selection plugin takes them as its selected nodes. Returns the remover.
+   */
+  onNodeSelection(handler: (nodes: readonly HierarchyNodeRef[]) => void): () => void {
+    this.nodeHandlers.add(handler);
+    return () => {
+      this.nodeHandlers.delete(handler);
+    };
+  }
+
   dispose(): void {
     clearTimeout(this.filterTimer);
     for (const off of this.unsubscribe) off();
@@ -211,6 +225,22 @@ export class HierarchyPanel {
     this.selecting = true;
     try {
       this.viewer.select(ids);
+      if (this.nodeHandlers.size > 0) {
+        // the highlighted rows as nodes of their models
+        const sources = this.tree.sources;
+        const nodes: HierarchyNodeRef[] = [];
+        for (const k of this.active) {
+          const source = sources[Math.floor(k / KEY_BASE)];
+          for (const [model, s] of this.sources) if (s === source) nodes.push({ model, node: k % KEY_BASE });
+        }
+        for (const h of this.nodeHandlers) {
+          try {
+            h(nodes);
+          } catch (e) {
+            console.error('mk-viewer: error in a node selection handler of the model tree', e);
+          }
+        }
+      }
     } finally {
       this.selecting = false;
     }

@@ -144,33 +144,41 @@ describe('selection plugin', () => {
     expect(v.getSelection().length).toBe(1);
   });
 
-  it('selected nodes: the level node when fully selected, else the object; a level change re-reads them', async () => {
-    const { v, sel, idOf, names } = await setup();
+  it('selected nodes follow the source: select() reads the topmost covered nodes, a click its level', async () => {
+    const { v, sel, idOf, hit, names } = await setup();
     expect(sel.nodes).toEqual([]);
-    // Part level: always the parts
+    // viewer.select (Search, Sets, the application): the topmost nodes entirely selected
     v.select([idOf('P0-0-0')]);
     expect(names()).toEqual(['P0-0-0']);
-    v.select([idOf('P0-0-0'), idOf('P0-0-1')]); // the whole spool, read as parts
-    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
-    // Spool level: the spool once all its parts are selected
-    sel.setLevel(1);
+    v.select([idOf('P0-0-0'), idOf('P0-0-1')]); // the whole spool
     expect(names()).toEqual(['S0-0']);
     v.select([idOf('P0-0-0'), idOf('P0-0-1'), idOf('P1-1-0')]);
     expect(names()).toEqual(['P1-1-0', 'S0-0']);
-    v.select([idOf('P0-0-0'), idOf('P1-1-0')]); // no spool complete
-    expect(names()).toEqual(['P0-0-0', 'P1-1-0']);
-    // Iso level: a whole spool is not a whole iso
-    sel.setLevel(2);
-    v.select([idOf('P0-0-0'), idOf('P0-0-1')]);
-    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
-    v.select([idOf('P0-0-0'), idOf('P0-0-1'), idOf('P0-1-0'), idOf('P0-1-1')]);
-    expect(names()).toEqual(['I0']);
-    // Top level with everything selected: the top nodes
-    sel.setLevel(4);
-    v.select(v.models[0].objectIds());
-    expect(names()).toEqual(['I0', 'I1', 'Loose']);
+    v.select(v.models[0].objectIds()); // everything: the root
+    expect(names()).toEqual(['R']);
+    // a click: the level's node, not promoted further
     sel.setLevel(0);
-    expect(sel.nodes.length).toBe(9);
+    v.selectPicked(hit('P0-0-0'), false);
+    v.selectPicked(hit('P0-0-1'), true); // Ctrl: the second part; the spool is complete but the level says parts
+    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
+    sel.setLevel(1);
+    expect(names()).toEqual(['P0-0-0', 'P0-0-1']); // a level change does not touch the selected nodes
+    v.selectPicked(hit('P0-0-0'), false); // the same two objects: the viewer does not re-select...
+    await Promise.resolve(); // ...but the click is still read at the level
+    expect(names()).toEqual(['S0-0']);
+    v.selectPicked(hit('P0-1-0'), true); // the iso is complete now, but the level says spools
+    expect(names()).toEqual(['S0-0', 'S0-1']);
+    v.selectPicked(hit('P0-1-0'), true); // Ctrl again: removed
+    expect(names()).toEqual(['S0-0']);
+    sel.setLevel(2);
+    v.selectPicked(hit('P1-0-0'), true); // at iso level: the whole iso added to the spool
+    expect(names()).toEqual(['I1', 'S0-0']);
+    // the context menu resolves without selecting: the next select() still reads covered nodes
+    v.select([]);
+    v.contextMenuAt(0, 0, 'mouse', hit('P0-0-0'));
+    await Promise.resolve();
+    v.select([idOf('P0-0-0'), idOf('P0-0-1')]);
+    expect(names()).toEqual(['S0-0']);
   });
 
   it('Parent, Child, Leaf, Sibling walk the tree from the selected nodes', async () => {
@@ -265,8 +273,8 @@ describe('selection plugin', () => {
     sel.parent();
     expect(names()).toEqual(['S0-0', 'S0-0']); // one spool in each model
     expect(v.getSelection().length).toBe(4);
-    m2.unload(); // re-read at the current (part) level: the first model's two parts
-    expect(names()).toEqual(['P0-0-0', 'P0-0-1']);
+    m2.unload(); // re-read: the first model's spool, entirely selected
+    expect(names()).toEqual(['S0-0']);
   });
 
   it('removing the plugin clears the resolver and the nodes; ui: false skips the panel', async () => {
@@ -282,6 +290,7 @@ describe('selection plugin', () => {
     const s = v.use(selectionPlugin({ ui: false, name: 's2' })) as SelectionPlugin;
     const calls: string[] = [];
     let provider: ((ids: number[]) => readonly { node: number }[]) | null = null;
+    let treeHandler: ((nodes: readonly { model: unknown; node: number }[]) => void) | null = null;
     const fakeUi = {
       addToggle: () => calls.push('toggle'),
       hierarchy: {
@@ -290,17 +299,31 @@ describe('selection plugin', () => {
           calls.push(p ? 'provider' : 'no provider');
         },
         updateSelection: () => calls.push('update'),
+        onNodeSelection: (h: typeof treeHandler) => {
+          treeHandler = h;
+          calls.push('tree');
+          return () => calls.push('no tree');
+        },
       },
     } as unknown as ViewerUi;
     const cleanup = s.ui!(fakeUi) as () => void;
-    expect(calls).toEqual(['provider']);
+    expect(calls).toEqual(['provider', 'tree']);
     expect((provider as unknown as (ids: number[]) => readonly { node: number }[])(v.getSelection()).map((n) => n.node)).toEqual(s.nodes.map((n) => n.node));
     s.parent();
-    expect(calls).toEqual(['provider', 'update']);
+    expect(calls).toEqual(['provider', 'tree', 'update']);
+    // a tree click tells the plugin which rows were meant
+    const model = v.models[0];
+    const spool = (() => {
+      for (let n = 0; n < model.hierarchy.nodeCount; n++) if (model.hierarchy.name(n) === 'S0-1') return n;
+      throw new Error('no S0-1');
+    })();
+    (treeHandler as unknown as (nodes: readonly { model: unknown; node: number }[]) => void)([{ model, node: spool }]);
+    expect(s.nodes.map((n) => n.model.hierarchy.name(n.node))).toEqual(['S0-1']);
+    expect(calls).toEqual(['provider', 'tree', 'update', 'update']);
     cleanup();
-    expect(calls).toEqual(['provider', 'update', 'no provider']);
+    expect(calls).toEqual(['provider', 'tree', 'update', 'update', 'no tree', 'no provider']);
     s.parent();
-    expect(calls.length).toBe(3); // unsubscribed
+    expect(calls.length).toBe(6); // unsubscribed
     expect(s.levels.map((l) => l.label)).toEqual(['Object', 'Parent', 'Top']);
   });
 });

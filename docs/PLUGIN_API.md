@@ -339,8 +339,8 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - `ui.hierarchy.setSelectedNodesProvider((objectIds) => nodes)` lets the plugin decide which nodes
   the model tree highlights for a selection (`{ model, node }` refs); null restores the default
   (the topmost nodes whose subtree is entirely selected). `ui.hierarchy.updateSelection()` re-reads
-  the selection when the answer changed without a selection change. The selection plugin provides
-  its nodes at the current level this way.
+  the selection when the answer changed without a selection change. `ui.hierarchy.onNodeSelection(
+  (nodes) => ...)` reports the rows a click in the tree selected. The selection plugin uses both.
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 
@@ -687,6 +687,6 @@ the hook the viewer calls after every selecting click to map the picked object t
 selects (its spool, its parent node, ...). A plain click selects the resolved objects, Ctrl / Shift
 adds or removes them as a whole, the context menu acts on them when nothing is selected, and the
 hover highlight stays on the object. One resolver at a time: a plugin that installs one removes it
-in `dispose()`. The plugin also reads the selection as *nodes* at the current level (a selected
-object's level node when all its objects are selected, else the object's own node) to offer
+in `dispose()`. The plugin also reads the selection as *nodes*, following its source (a click: the
+level node; a tree click: the clicked rows; otherwise the topmost nodes entirely selected) to offer
 Parent / Child / Leaf / Sibling.

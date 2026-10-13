@@ -8,9 +8,10 @@
  *   resolver (`viewer.setSelectionResolver`), so Ctrl / Shift + click adds or removes at the same
  *   level and the context menu acts at it too.
  * - **Parent / Child / Leaf / Sibling**: move the current selection through the tree. The selection is
- *   read as its *selected nodes* at the current level: the level node of each selected object
- *   when all of that node's objects are selected (the spool, at spool level), else the object's
- *   own node. Parent selects their parents, Child their children (one level down, a leaf stays),
+ *   read as its *selected nodes*, which follow where it came from: a click selects its level node
+ *   (the spool, at spool level), a tree click the clicked rows, anything else (`viewer.select`,
+ *   Search, Sets) the topmost nodes whose subtree is entirely selected (`PropertyIndex.nodesOf`).
+ *   Parent selects their parents, Child their children (one level down, a leaf stays),
  *   Leaf the objects under them (their own leaf nodes, from any depth), Sibling all children of
  *   their parents; the nodes an action produced stay the selected nodes until the selection is
  *   changed from elsewhere. The tree is abstract: isos, spools and idents are one example.
@@ -79,10 +80,12 @@ export interface SelectionPlugin extends PluginInstance {
   /** What a click on this object selects at the current level: the objects under its level node. */
   resolve(objectId: number): Float64Array;
   /**
-   * The selected nodes: after Parent / Child / Leaf / Sibling, the nodes the action produced; otherwise
-   * (a click, the tree, `viewer.select`) the current level's node of each selected object when
-   * all of that node's objects are selected, else the object's own node. Objects without a
-   * hierarchy node are not listed.
+   * The selected nodes: what the selection came from. A click: the clicked object's level node,
+   * added to (Ctrl / Shift) or replacing the previous nodes, which stay as long as their objects
+   * stay selected; a tree click: the clicked rows; an action: the nodes it produced; anything
+   * else (`viewer.select`, Search, Sets, a model change): the topmost nodes whose subtree is
+   * entirely selected. Objects under none of these are listed as their own nodes. Objects without
+   * a hierarchy node are not listed.
    */
   readonly nodes: readonly SelectedNode[];
   /** Selects the parents of the selected nodes (a top node stays). */
@@ -133,6 +136,10 @@ class SelectionPluginImpl implements SelectionPlugin {
   private readonly offs: (() => void)[];
   /** True while the plugin itself selects: the selection event then keeps its nodes. */
   private selecting = false;
+  /** Set by the click resolver until the click's `selection` event (same task): read as a click. */
+  private clickPending = false;
+  /** The level node the last click resolved to. */
+  private lastClick: SelectedNode | null = null;
   private disposed = false;
   private uiCleanup: (() => void) | null = null;
 
@@ -146,15 +153,35 @@ class SelectionPluginImpl implements SelectionPlugin {
     if (levels.length === 0) throw new RangeError('selection plugin: `levels` is empty');
     this.levelList = Object.freeze(levels);
     this.levelIndex = opts.level !== undefined && opts.level >= 0 && opts.level < levels.length ? Math.floor(opts.level) : 0;
-    this.viewer.setSelectionResolver((hit: PickResult) => this.resolve(hit.objectId));
+    this.viewer.setSelectionResolver((hit: PickResult) => {
+      // the click's selection event follows synchronously; a resolve without one (the context
+      // menu's target) must not colour the next selection
+      const target = this.levelNodeOf(hit.objectId);
+      this.lastClick = target;
+      this.clickPending = true;
+      queueMicrotask(() => {
+        if (!this.clickPending || this.disposed) return;
+        // no selection event followed: the click resolved to the selection as it was (the viewer
+        // skips an identical re-select). Still read it as the click meant
+        this.clickPending = false;
+        if (this.viewer.getSelection().length === 0) return;
+        this.selectedNodes = this.readClick(this.viewer.getSelection());
+        this.emit();
+      });
+      return target ? target.model.properties.objectsUnder(target.node) : Float64Array.of(hit.objectId);
+    });
     const onSelection = (ids: number[]): void => {
       if (this.selecting) return;
-      this.selectedNodes = this.nodesOf(ids);
+      this.selectedNodes = this.clickPending ? this.readClick(ids) : this.nodesCovered(ids);
+      this.clickPending = false;
       this.emit();
     };
-    const onModels = (): void => onSelection(this.viewer.getSelection());
+    const onModels = (): void => {
+      this.selectedNodes = this.nodesCovered(this.viewer.getSelection());
+      this.emit();
+    };
     this.offs = [this.viewer.on('selection', onSelection), this.viewer.on('modelLoaded', onModels), this.viewer.on('modelUnloaded', onModels)];
-    this.selectedNodes = this.nodesOf(this.viewer.getSelection());
+    this.selectedNodes = this.nodesCovered(this.viewer.getSelection());
   }
 
   // --- public API -------------------------------------------------------------------------------
@@ -169,16 +196,13 @@ class SelectionPluginImpl implements SelectionPlugin {
 
   setLevel(index: number): void {
     if (!(index >= 0 && index < this.levelList.length) || index === this.levelIndex) return;
-    this.levelIndex = Math.floor(index);
-    this.selectedNodes = this.nodesOf(this.viewer.getSelection()); // the same objects, read at the new level
+    this.levelIndex = Math.floor(index); // the next click; the selected nodes stay what they are
     this.emit();
   }
 
   resolve(objectId: number): Float64Array {
-    const model = this.viewer.getModelOf(objectId);
-    const node = model ? model.hierarchy.nodeOfObject(objectId) : -1;
-    if (!model || node < 0) return Float64Array.of(objectId);
-    return model.properties.objectsUnder(levelNode(model, node, this.levelList[this.levelIndex]));
+    const target = this.levelNodeOf(objectId);
+    return target ? target.model.properties.objectsUnder(target.node) : Float64Array.of(objectId);
   }
 
   get nodes(): readonly SelectedNode[] {
@@ -244,9 +268,15 @@ class SelectionPluginImpl implements SelectionPlugin {
     // parts of a spool selected one by one or with Sibling show as parts, and a spool click as the spool
     ui.hierarchy.setSelectedNodesProvider(() => this.selectedNodes);
     const offChanged = this.on('changed', () => ui.hierarchy.updateSelection());
+    // a click in the tree says which rows the user meant
+    const offTree = ui.hierarchy.onNodeSelection((nodes) => {
+      this.selectedNodes = nodes.map(({ model, node }) => ({ model, node }));
+      this.emit();
+    });
     const cleanup = this.opts.ui === false ? (): void => {} : createSelectionPanel(this, this.viewer, ui, this.opts.label ?? 'Selection');
     const wrapped = (): void => {
       offChanged();
+      offTree();
       ui.hierarchy.setSelectedNodesProvider(null);
       cleanup();
       if (this.uiCleanup === wrapped) this.uiCleanup = null;
@@ -311,29 +341,67 @@ class SelectionPluginImpl implements SelectionPlugin {
     this.emit();
   }
 
-  /**
-   * The selected nodes of `ids` at the current level: each object's level node when its subtree
-   * is entirely in `ids` (it lies under one of the topmost covered nodes, `PropertyIndex.nodesOf`),
-   * else the object's own node. Duplicates dropped, in order of first appearance.
-   */
-  private nodesOf(ids: ArrayLike<number>): SelectedNode[] {
+  /** The topmost nodes whose subtree is entirely in `ids`, per model (`PropertyIndex.nodesOf`). */
+  private nodesCovered(ids: ArrayLike<number>): SelectedNode[] {
     const out: SelectedNode[] = [];
     if (ids.length === 0) return out;
-    const level = this.levelList[this.levelIndex];
     for (const model of this.viewer.models) {
-      const h = model.hierarchy;
-      const covered = new Set(model.properties.nodesOf(ids));
-      if (covered.size === 0) continue;
-      const seen = new Set<number>();
-      for (let i = 0; i < ids.length; i++) {
-        const leaf = h.nodeOfObject(ids[i]);
-        if (leaf < 0) continue;
-        let node = levelNode(model, leaf, level);
-        let full = false;
-        for (let a = node; a >= 0 && !full; a = h.parent(a)) full = covered.has(a);
-        if (!full) node = leaf;
-        if (seen.has(node)) continue;
-        seen.add(node);
+      const nodes = model.properties.nodesOf(ids);
+      for (let i = 0; i < nodes.length; i++) out.push({ model, node: nodes[i] });
+    }
+    return out;
+  }
+
+  /** The current level's node of an object, or null when the object has no hierarchy node. */
+  private levelNodeOf(objectId: number): SelectedNode | null {
+    const model = this.viewer.getModelOf(objectId);
+    const node = model ? model.hierarchy.nodeOfObject(objectId) : -1;
+    if (!model || node < 0) return null;
+    return { model, node: levelNode(model, node, this.levelList[this.levelIndex]) };
+  }
+
+  /**
+   * The selected nodes after a click whose selection is `ids`: the previous nodes whose objects
+   * are all still selected (but not those under the clicked node, which takes their place), plus
+   * the clicked level node when its objects are selected (a Ctrl click that removed them drops
+   * it), plus the own nodes of any selected object under none of these.
+   */
+  private readClick(ids: ArrayLike<number>): SelectedNode[] {
+    const selected = new Set<number>();
+    for (let i = 0; i < ids.length; i++) selected.add(ids[i]);
+    const allSelected = (n: SelectedNode): boolean => {
+      const o = n.model.properties.objectsUnder(n.node);
+      if (o.length === 0) return false;
+      for (let i = 0; i < o.length; i++) if (!selected.has(o[i])) return false;
+      return true;
+    };
+    const click = this.lastClick;
+    const under = (n: SelectedNode): boolean => {
+      if (!click || n.model !== click.model) return false;
+      for (let a = n.node; a >= 0; a = n.model.hierarchy.parent(a)) if (a === click.node) return true;
+      return false;
+    };
+    const out = this.selectedNodes.filter((n) => !under(n) && allSelected(n));
+    if (click && allSelected(click) && !out.some((n) => n.model === click.model && n.node === click.node)) out.push(click);
+    // selected objects under none of the nodes: their own nodes
+    const covered = new Set<number>();
+    for (const n of out) for (const id of n.model.properties.objectsUnder(n.node)) covered.add(id);
+    if (covered.size < selected.size) {
+      const have = new Map<Model, Set<number>>();
+      for (const n of out) {
+        let set = have.get(n.model);
+        if (!set) have.set(n.model, (set = new Set()));
+        set.add(n.node);
+      }
+      for (const id of selected) {
+        if (covered.has(id)) continue;
+        const model = this.viewer.getModelOf(id);
+        const node = model ? model.hierarchy.nodeOfObject(id) : -1;
+        if (!model || node < 0) continue;
+        let set = have.get(model);
+        if (!set) have.set(model, (set = new Set()));
+        if (set.has(node)) continue;
+        set.add(node);
         out.push({ model, node });
       }
     }
