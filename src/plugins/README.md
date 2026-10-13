@@ -15,7 +15,7 @@ and the built-in plugins:
   missing values, async resolution; no colours);
 - `selection/`: `selectionPlugin()`, the selection level (what a click selects: the object, an
   ancestor N steps up or the nearest ancestor with a property; installed through
-  `viewer.setSelectionResolver`) and Parent / Leaf / Sibling over the selected nodes (toolbar
+  `viewer.setSelectionResolver`) and Parent / Child / Leaf / Sibling over the selected nodes (toolbar
   toggle, panel).
 
 How to write a viewer plugin (lifecycle, everything a plugin can use, rules, walkthrough) is

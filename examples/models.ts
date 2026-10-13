@@ -9,7 +9,7 @@
  * menu entries "Change colour" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
  * a legend of pasted Tag / Status / State / Colour rows), the sets plugin (`setsPlugin`, toolbar
  * button "Sets": saved property searches), the selection plugin (`selectionPlugin`, toolbar button
- * "Selection": the selection level and Parent / Leaf / Sibling) and a small third-party plugin written
+ * "Selection": the selection level and Parent / Child / Leaf / Sibling) and a small third-party plugin written
  * against the public API only (./section-plugin.ts, toolbar button "Cut").
  *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
@@ -33,7 +33,7 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
   // selectionPlugin adds the "Selection" button: the selection level (what a click selects; the
-  // Spool and Iso levels use the properties of the PCF-derived spool models) and Parent / Leaf / Sibling
+  // Spool and Iso levels use the properties of the PCF-derived spool models) and Parent / Child / Leaf / Sibling
   plugins: [
     measurePlugin({ decimals: 3 }),
     sectionPlugin(),
