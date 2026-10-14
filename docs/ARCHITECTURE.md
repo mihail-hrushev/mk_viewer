@@ -19,7 +19,8 @@ src/layout.ts      shared binary layouts (contract)
 src/types.ts       public API types (contract)
 src/math/          vec3/mat4/aabb/frustum helpers on plain Float32Array, no classes on hot paths
 src/camera/        Camera (view/projection, perspective + ortho), OrbitControls (DOM wiring),
-                   gestures.ts (DOM-free mouse/touch gesture recognizer), orbitMath, fit-to-bounds
+                   gestures.ts (DOM-free mouse/touch gesture recognizer), orbitMath, fit-to-bounds,
+                   standardViews.ts (top / front / iso ... directions for Y up and Z up)
 src/primitives/    pure functions returning GeometryData (box, sphere, cylinder, cone, plane, torus, extrusion)
 src/core/          CPU scene data: FragmentList, GeometryStore, MaterialStore, Batcher, DrawList BVH + traversal
 src/gl/            thin WebGL2 layer: context/caps, Program, mirrored buffers, data textures, render targets,

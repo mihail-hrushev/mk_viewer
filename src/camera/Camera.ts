@@ -335,15 +335,24 @@ export class Camera {
    * without applying it. Returns null when the box is empty. `padding` > 1 leaves extra margin.
    */
   computeFitState(box: ReadArray, padding = 1, out?: CameraState): CameraState | null {
-    if (aabb.isEmpty(box)) return null;
-    const s = this.getState(out);
-    aabb.center(tmpA, box);
-    let r = aabb.radius(box) * padding;
-    if (!(r > 0)) r = Math.max(1e-6, this.distance * 0.1);
     // keep the view direction
     vec3.sub(tmpB, this._eye, this._target);
     if (vec3.lengthSq(tmpB) === 0) vec3.set(tmpB, 0, 0, 1);
-    vec3.normalize(tmpB, tmpB);
+    return this.computeFitStateFrom(box, tmpB, this._up, padding, out);
+  }
+
+  /**
+   * Like `computeFitState`, but looking from `direction` (target -> eye, any length) with `up`;
+   * the projection is kept.
+   */
+  computeFitStateFrom(box: ReadArray, direction: ReadArray, up: ReadArray, padding = 1, out?: CameraState): CameraState | null {
+    if (aabb.isEmpty(box)) return null;
+    const s = this.getState(out);
+    vec3.normalize(tmpB, direction);
+    if (vec3.lengthSq(tmpB) === 0) vec3.set(tmpB, 0, 0, 1);
+    aabb.center(tmpA, box);
+    let r = aabb.radius(box) * padding;
+    if (!(r > 0)) r = Math.max(1e-6, this.distance * 0.1);
     const t = Math.tan(this._fov / 2);
     const aspect = this.aspect;
     let dist: number;
@@ -357,6 +366,7 @@ export class Camera {
     s.eye[0] = tmpA[0] + tmpB[0] * dist;
     s.eye[1] = tmpA[1] + tmpB[1] * dist;
     s.eye[2] = tmpA[2] + tmpB[2] * dist;
+    s.up[0] = up[0]; s.up[1] = up[1]; s.up[2] = up[2];
     return s;
   }
 

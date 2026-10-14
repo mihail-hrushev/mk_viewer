@@ -258,6 +258,32 @@ viewer.setCamera({ eye: [24, 20, 26], target: [0, 6, 0] });
 `fitToView(ids?, animate?)` frames objects or the whole scene, `getCamera()` returns
 `{ eye, target, up, fov, orthographic }`, and `getBounds(ids?)` returns world bounds.
 
+```ts
+viewer.setProjection('orthographic');             // or 'perspective'; the framing is kept
+viewer.setFieldOfView(Math.PI / 3);               // 60 degrees, the view at the orbit centre keeps its size
+viewer.setStandardView('top');                    // top, bottom, front, back, left, right, iso; frames the scene
+viewer.setStandardView('front', selectedIds);     // ... or the given objects
+viewer.setNavigation({ zoomSpeed: 2, animationMs: 250 });
+```
+
+- `setProjection(p)` / `getProjection()` switch between `'perspective'` and `'orthographic'`. The
+  orthographic view height follows the distance to the orbit centre and the field of view, so the
+  image does not jump, and zooming an orthographic view works as before.
+- `setFieldOfView(fov, animate?)` changes the vertical field of view (radians, in (0, PI)) and moves
+  the eye along the view direction so the view at the orbit centre keeps its size: only the
+  perspective changes. `setCamera({ fov })` keeps the eye instead, so the view zooms.
+- `setStandardView(view, ids?, animate = true)` looks from one side and frames the given objects or
+  the whole scene. Sides are relative to the world up axis: with Z up, `front` looks from -Y and
+  `right` from +X; with Y up, `front` looks from +Z. `top` has the back at the top of the image;
+  `iso` is the direction of the initial view (front right top).
+- `getNavigation()` / `setNavigation(partial)` read and change the built-in controls' `rotateSpeed`,
+  `panSpeed`, `zoomSpeed`, `moveSpeed` (multipliers, default 1, 0 turns that movement off) and
+  `animationMs` (duration of animated camera moves, default 400, 0 jumps).
+- `new Viewer(canvas, { fov, projection, navigation })` sets them from the start. Invalid values are
+  a `RangeError`.
+
+The **Camera** plugin (below) puts all of this in a panel.
+
 ### Section planes
 
 Up to 6 planes. Geometry on the positive side of the normal is cut away (from
@@ -620,7 +646,8 @@ const viewer = new Viewer(canvas, {
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
   // selectionPlugin adds the "Selection" button: the selection level and Parent / Child / Leaf / Sibling
   // screenshotPlugin adds the "Screenshot" button: the view rendered at a chosen size, opened in a new tab
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()],
+  // cameraPlugin adds the "Camera" button: projection, field of view, standard views, navigation speeds
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin(), cameraPlugin()],
 });
 ```
 
@@ -780,6 +807,23 @@ blocks it anyway the panel shows an **Open screenshot** link instead. Headless: 
 const shot = viewer.getPlugin<ScreenshotPlugin>('screenshot')!;
 const blob = await shot.capture(1920, 1080);   // the encoded image, nothing opened
 await shot.open();                             // the panel's size, in a new tab
+```
+
+**Camera** (`cameraPlugin`): the **Camera** toolbar button opens a panel over the camera API (see
+*Camera* above): **Perspective** / **Orthographic**; a **Field of view** slider (10 to 120 degrees,
+disabled while orthographic, the framing is kept); the standard views **Top**, **Front**, **Left**,
+**Iso**, **Bottom**, **Back**, **Right** and **Fit**; the navigation sliders **Orbit**, **Pan**,
+**Zoom** and **Walk speed** (1/4 to 4 times the default) and **Animation** (0 to 1500 ms); and
+**Reset**, which restores the projection, field of view and navigation settings the viewer had when
+the plugin was installed. Projection and field of view follow the `camera` event, so changes from
+code show while the panel is open. Headless: `projection`, `fovDegrees`, `defaults` and
+`reset(animate?)`. Options: `minFov`, `maxFov` (the slider's range in degrees), `label`, `ui`, `name`.
+
+```ts
+const camera = viewer.getPlugin<CameraPlugin>('camera')!;
+camera.projection = 'orthographic';
+camera.fovDegrees = 30;   // viewer.setFieldOfView(30 * PI / 180)
+camera.reset();
 ```
 
 ## Controls

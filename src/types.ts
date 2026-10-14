@@ -59,6 +59,12 @@ export interface ViewerOptions {
   pixelRatio?: number;
   /** Install built-in orbit/pan/zoom controls. Default true. */
   controls?: boolean;
+  /** Vertical field of view in radians, in (0, PI). Default PI / 4 (45 degrees). */
+  fov?: number;
+  /** Camera projection from the start (see `setProjection`). Default 'perspective'. */
+  projection?: Projection;
+  /** Navigation speeds and the camera animation time (see `setNavigation`). */
+  navigation?: Partial<NavigationSettings>;
   /** Click-to-select and hover highlight handled by the viewer. Default true. */
   autoSelect?: boolean;
   /**
@@ -435,6 +441,41 @@ export interface CameraState {
   orthographic: boolean;
 }
 
+/**
+ * Camera projection (`viewer.setProjection`). An orthographic view has no perspective
+ * foreshortening: parallel lines stay parallel and sizes do not shrink with distance.
+ */
+export type Projection = 'perspective' | 'orthographic';
+
+/**
+ * A standard view (`viewer.setStandardView`), named after the side the camera looks from, relative
+ * to the world up axis (`ViewerOptions.up`). With Z up, 'front' looks from -Y towards +Y and
+ * 'right' from +X; with Y up, 'front' looks from +Z towards -Z and 'right' from +X. 'top' and
+ * 'bottom' look along the up axis ('top' has the back at the top of the image, 'bottom' the
+ * front); 'iso' looks down from the front right top corner, the direction of the initial view.
+ */
+export type StandardView = 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right' | 'iso';
+
+/**
+ * How the built-in controls move the camera (`viewer.setNavigation`). Speeds are multipliers: 1 is
+ * the default, 2 twice as fast, 0 turns that movement off.
+ */
+export interface NavigationSettings {
+  /** Orbit (left drag, one finger). Default 1: a drag across the canvas height turns by 180 degrees. */
+  rotateSpeed: number;
+  /** Pan (right / middle drag, two fingers). Default 1: the point under the cursor follows it. */
+  panSpeed: number;
+  /** Wheel and pinch zoom. Default 1. */
+  zoomSpeed: number;
+  /** W / A / S / D / E / C keys. Default 1: the distance to the orbit centre per second. */
+  moveSpeed: number;
+  /**
+   * Duration of animated camera moves (fit, zoom to object, standard views...) in ms; 0 jumps
+   * straight to the end. Default 400.
+   */
+  animationMs: number;
+}
+
 export interface SectionPlane {
   /** Plane normal; geometry on the positive side is cut away. */
   normal: Vec3;
@@ -620,7 +661,37 @@ export interface ViewerApi {
 
   // --- camera ---
   getCamera(): CameraState;
+  /**
+   * Sets any part of the camera state (missing fields keep their values). A new `fov` keeps the
+   * eye where it is, so the view zooms; `setFieldOfView` keeps the framing instead.
+   */
   setCamera(state: Partial<CameraState>, animate?: boolean): void;
+  /**
+   * Changes the vertical field of view (radians, in (0, PI)) and moves the eye along the view
+   * direction so that the view at the orbit centre keeps its size: only the perspective changes,
+   * as when a photographer changes the lens and steps back. Also used by orthographic views, where
+   * it shows once the projection is switched back to perspective. RangeError for a value outside
+   * (0, PI).
+   */
+  setFieldOfView(fov: number, animate?: boolean): void;
+  getProjection(): Projection;
+  /**
+   * Switches between perspective and orthographic projection. The view at the orbit centre keeps
+   * its size, so the image does not jump; zooming an orthographic view still dollies the eye.
+   */
+  setProjection(projection: Projection): void;
+  /**
+   * Looks at the given objects, or the whole scene, from one side (see `StandardView`) and frames
+   * them. On an empty scene only the view direction changes. `animate` defaults to true.
+   */
+  setStandardView(view: StandardView, objectIds?: ObjectSelection, animate?: boolean): void;
+  /** The built-in controls' speeds and the camera animation time (a fresh object). */
+  getNavigation(): NavigationSettings;
+  /**
+   * Changes navigation speeds and the camera animation time; missing fields keep their values.
+   * RangeError for a negative or non-finite value.
+   */
+  setNavigation(settings: Partial<NavigationSettings>): void;
   /** Frame the given objects, or the whole scene. */
   fitToView(objectIds?: ObjectSelection, animate?: boolean): void;
   /**

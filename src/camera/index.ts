@@ -6,3 +6,4 @@ export { CameraTransition, fly, levelCamera, orbit, pan, zoomAt, easeInOutCubic,
 export { twoFingerStep } from './orbitMath';
 export { GestureRecognizer, GestureMode, PointerKind, TapKind, pointerKindOf } from './gestures';
 export type { GestureOptions, GestureSink } from './gestures';
+export { standardView, STANDARD_VIEWS } from './standardViews';

@@ -78,9 +78,9 @@ export function pickLogPlugin(): ViewerPlugin {
 **Registering.** An application installs plugins when it creates the viewer, or later:
 
 ```ts
-import { Viewer, createViewerUi, colorPlugin, measurePlugin, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
+import { Viewer, createViewerUi, cameraPlugin, colorPlugin, measurePlugin, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
 
-const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()] }); // in this order
+const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin(), cameraPlugin()] }); // in this order
 createViewerUi(viewer);                                         // optional built-in UI
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!;     // a plugin's own API
 viewer.use(pickLogPlugin());                                    // later: returns the instance
@@ -570,7 +570,7 @@ Registering it, as [`examples/models.ts`](../examples/models.ts) does (try it on
 
 ```ts
 const viewer = new Viewer(canvas, {
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()],
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin(), cameraPlugin()],
 });
 const ui = createViewerUi(viewer); // draws the context menu
 ```
@@ -671,6 +671,13 @@ in a new tab. Its one subtlety is browser etiquette rather than viewer API: the 
 synchronously in the click's task, before the render, so a popup blocker lets it through, and the
 panel falls back to a link when it is blocked anyway. Read it for the bare skeleton of a `ui(ui)`
 hook: toolbar toggle, `Panel`, `mkv-field` inputs, an `mkv-dim` message line, cleanup.
+
+`cameraPlugin()` (`src/plugins/camera/`) is a settings panel with no state of its own beyond what **Reset** restores: every
+control calls the camera API (`setProjection`, `setFieldOfView`, `setStandardView`, `fitToView`,
+`setNavigation`) and the panel reads the viewer back, following the `camera` event for projection
+and field of view and re-reading the navigation settings when it opens. Read it for the shared
+panel controls: `mkv-seg` (a segmented button group with `mkv-on` on the chosen one), `mkv-slider`
+(label, range input, `<output>`), `mkv-views` (a grid of buttons) and `mkv-subhead` sections.
 
 `selectionPlugin()` (`src/plugins/selection/`) changes what a **click** selects without being a
 tool: it installs a **selection resolver** (`viewer.setSelectionResolver(hit => objectIds | null)`),

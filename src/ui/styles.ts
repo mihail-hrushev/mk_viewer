@@ -81,6 +81,18 @@ const CSS = `
 .mkv-panel [hidden]{display:none}
 .mkv-propbody>*{flex-shrink:0}
 .mkv-subhead{font-weight:600;padding-top:8px;border-top:1px solid #3c4043}
+.mkv-slider{display:grid;grid-template-columns:92px minmax(0,1fr) 52px;align-items:center;gap:8px;min-height:32px}
+.mkv-panel .mkv-slider input{width:100%;min-width:0;margin:0;accent-color:#1a73e8;cursor:pointer}
+.mkv-panel .mkv-slider input:disabled{opacity:.4;cursor:default}
+.mkv-slider output{text-align:right;color:#9aa0a6;font-size:12px;font-variant-numeric:tabular-nums}
+.mkv-seg{display:flex}
+.mkv-seg .mkv-btn{flex:1 1 0;min-width:0;border-radius:0}
+.mkv-seg .mkv-btn+.mkv-btn{margin-left:-1px}
+.mkv-seg .mkv-btn:first-child{border-radius:6px 0 0 6px}
+.mkv-seg .mkv-btn:last-child{border-radius:0 6px 6px 0}
+.mkv-seg .mkv-btn.mkv-on{background:#1a73e8;border-color:#1a73e8}
+.mkv-views{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.mkv-views .mkv-btn{min-width:0;padding:4px}
 .mkv-field{font:inherit;color:inherit;min-width:0;min-height:32px;padding:4px 8px;border:1px solid #5f6368;border-radius:6px;background:#202124;outline:none}
 .mkv-field:focus{border-color:#8ab4f8}
 textarea.mkv-field{width:100%;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px}

@@ -25,3 +25,5 @@ export { selectionPlugin, levelNode, DEFAULT_LEVELS } from './selection/selectio
 export type { SelectionPlugin, SelectionPluginOptions, SelectionLevel, SelectedNode, SelectionEvents } from './selection/selectionPlugin';
 export { screenshotPlugin } from './screenshot/screenshotPlugin';
 export type { ScreenshotPlugin, ScreenshotPluginOptions } from './screenshot/screenshotPlugin';
+export { cameraPlugin } from './camera/cameraPlugin';
+export type { CameraPlugin, CameraPluginOptions, CameraDefaults } from './camera/cameraPlugin';

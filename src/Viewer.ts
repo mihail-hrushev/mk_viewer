@@ -59,13 +59,16 @@ import type {
   MeshBatchParams,
   MeshId,
   MeshParams,
+  NavigationSettings,
   PickResult,
+  Projection,
   SelectionResolver,
   Primitives,
   ScreenPoint,
   SectionPlane,
   SnapOptions,
   SnapResult,
+  StandardView,
   ObjectSelection,
   PropertySearch,
   ToolEndReason,
@@ -87,7 +90,7 @@ import { DEFAULT_OBJECT_ID_BASE } from './loaders/objectIds';
 import { FRAG_TEX_WIDTH, FragFlags, MAX_SECTION_PLANES } from './layout';
 import { Scene } from './core';
 import { GlContext, planeFromNormalPoint } from './gl';
-import { Camera, CameraTransition, OrbitControls } from './camera';
+import { Camera, CameraTransition, OrbitControls, standardView } from './camera';
 import * as prim from './primitives';
 import { Renderer, type RenderHost } from './render/Renderer';
 import { foldTransform, needsRecentre, positionsBounds, shiftPositions, transformedCenter } from './render/origin';
@@ -104,6 +107,7 @@ const OBJECT_ZOOM_DISTANCE = 3;
 const SNAP_RADIUS_PX = 12;
 const SNAP_RADIUS_TOUCH_PX = 24;
 const DEFAULT_EDGE_ANGLE = 20;
+const DEFAULT_NAVIGATION: Readonly<NavigationSettings> = { rotateSpeed: 1, panSpeed: 1, zoomSpeed: 1, moveSpeed: 1, animationMs: 400 };
 
 type Listener<K extends keyof ViewerEvents> = (payload: ViewerEvents[K]) => void;
 
@@ -196,6 +200,8 @@ export class Viewer implements ViewerApi {
   private ghostHidden = false;
   private sectionWorld: { n: [number, number, number]; p: [number, number, number] }[] = [];
   private readonly transition = new CameraTransition();
+  /** Navigation settings; the controls' speeds mirror them. */
+  private readonly nav: NavigationSettings = { ...DEFAULT_NAVIGATION };
   private readonly listeners: { [K in keyof ViewerEvents]: Set<Listener<K>> } = {
     pick: new Set(),
     hover: new Set(),
@@ -270,6 +276,11 @@ export class Viewer implements ViewerApi {
       for (const p of options.loaders) this.registry.register(p);
     }
 
+    // checked before anything is allocated
+    if (options.fov !== undefined) checkFov(options.fov);
+    if (options.projection !== undefined) checkProjection(options.projection);
+    if (options.navigation) Object.assign(this.nav, navigationPatch(options.navigation));
+
     const ctx = GlContext.create(canvas);
     if (ctx.caps.maxTextureSize < FRAG_TEX_WIDTH) {
       const max = ctx.caps.maxTextureSize;
@@ -281,12 +292,18 @@ export class Viewer implements ViewerApi {
     }
     this.ctx = ctx;
     this.scene = new Scene();
-    this.camera = new Camera({ up: this.up });
+    this.camera = new Camera({ up: this.up, fov: options.fov, orthographic: options.projection === 'orthographic' });
+    const nav = this.nav;
     this.controls =
       options.controls === false
         ? null
         : new OrbitControls(canvas, this.camera, {
             up: this.up,
+            rotateSpeed: nav.rotateSpeed,
+            panSpeed: nav.panSpeed,
+            zoomSpeed: nav.zoomSpeed,
+            moveSpeed: nav.moveSpeed,
+            animationMs: nav.animationMs,
             pickPivot: (x, y) => this.renderer.pick(x, y).then((r) => (r ? r.position : null)),
             onInteractionStart: () => {
               this.toolLeave();
@@ -681,6 +698,62 @@ export class Viewer implements ViewerApi {
     if (state.eye) rel.eye = [state.eye[0] - o[0], state.eye[1] - o[1], state.eye[2] - o[2]];
     if (state.target) rel.target = [state.target[0] - o[0], state.target[1] - o[1], state.target[2] - o[2]];
     this.applyCamera(rel, animate);
+  }
+
+  setFieldOfView(fov: number, animate = false): void {
+    checkFov(fov);
+    const cam = this.camera;
+    const s = cam.getState(); // origin-relative
+    // keep the view height at the target: distance * tan(fov / 2) stays the same
+    const k = Math.tan(cam.fov / 2) / Math.tan(fov / 2);
+    for (let i = 0; i < 3; i++) s.eye[i] = s.target[i] + (s.eye[i] - s.target[i]) * k;
+    s.fov = fov;
+    this.applyCamera(s, animate);
+  }
+
+  getProjection(): Projection {
+    return this.camera.orthographic ? 'orthographic' : 'perspective';
+  }
+
+  setProjection(projection: Projection): void {
+    checkProjection(projection);
+    // the orthographic view height follows distance and fov, so the framing at the target is kept;
+    // set directly so that a running camera transition goes on
+    this.camera.orthographic = projection === 'orthographic';
+    this.renderer.wake();
+  }
+
+  setStandardView(view: StandardView, objectIds?: ObjectSelection, animate = true): void {
+    const dir = [0, 0, 0], up = [0, 0, 0];
+    standardView(view, this.up, dir, up);
+    const cam = this.camera;
+    const box = this.scene.getBounds(objectIds);
+    let s = box ? cam.computeFitStateFrom(box, dir, up, 1.05) : null;
+    if (!s) {
+      // nothing to frame: turn about the target
+      s = cam.getState();
+      const d = cam.distance || 1;
+      for (let i = 0; i < 3; i++) {
+        s.eye[i] = s.target[i] + dir[i] * d;
+        s.up[i] = up[i];
+      }
+    }
+    this.applyCamera(s, animate);
+  }
+
+  getNavigation(): NavigationSettings {
+    return { ...this.nav };
+  }
+
+  setNavigation(settings: Partial<NavigationSettings>): void {
+    const n = Object.assign(this.nav, navigationPatch(settings));
+    const c = this.controls;
+    if (!c) return;
+    c.rotateSpeed = n.rotateSpeed;
+    c.panSpeed = n.panSpeed;
+    c.zoomSpeed = n.zoomSpeed;
+    c.moveSpeed = n.moveSpeed;
+    c.animationMs = n.animationMs;
   }
 
   fitToView(objectIds?: ObjectSelection, animate = false): void {
@@ -1548,7 +1621,7 @@ export class Viewer implements ViewerApi {
 
   private applyCamera(rel: Partial<CameraState>, animate: boolean): void {
     if (this.controls) this.controls.setCamera(rel, animate);
-    else if (animate) this.transition.start(this.camera, rel, 400);
+    else if (animate && this.nav.animationMs > 0) this.transition.start(this.camera, rel, this.nav.animationMs);
     else {
       this.transition.cancel();
       this.camera.setState(rel);
@@ -1838,6 +1911,32 @@ function inputName(input: LoaderInput): string {
   }
   const n = (input as { name?: unknown }).name;
   return typeof n === 'string' && n ? n : 'model';
+}
+
+function checkFov(fov: number): void {
+  if (typeof fov !== 'number' || !(fov > 0 && fov < Math.PI)) {
+    throw new RangeError(`mk-viewer: field of view must be in (0, PI) radians, got ${String(fov)}`);
+  }
+}
+
+function checkProjection(p: Projection): void {
+  if (p !== 'perspective' && p !== 'orthographic') {
+    throw new RangeError(`mk-viewer: projection must be 'perspective' or 'orthographic', got ${String(p)}`);
+  }
+}
+
+/** The known fields of `settings`, checked (all or nothing). */
+function navigationPatch(settings: Partial<NavigationSettings>): Partial<NavigationSettings> {
+  const out: Partial<NavigationSettings> = {};
+  for (const key of Object.keys(DEFAULT_NAVIGATION) as (keyof NavigationSettings)[]) {
+    const v = settings[key];
+    if (v === undefined) continue;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+      throw new RangeError(`mk-viewer: navigation ${key} must be a finite number >= 0, got ${String(v)}`);
+    }
+    out[key] = v;
+  }
+  return out;
 }
 
 function parseBackground(bg: ViewerOptions['background']): [number[], number[]] {
