@@ -331,6 +331,10 @@ exists. Put toolbar code in the `ui(ui)` hook:
 - `ui.settings.addToggle({ label, title, get, set })` adds an on / off switch for a setting of the
   plugin to the Settings panel (next to Show edges, Selected x-ray and Ghost hidden) and returns a function that
   removes it; `get` is re-read whenever the panel opens.
+- `ui.settings.addColors({ label, title, colors, get, set })` adds a row of colour swatches
+  (`colors` are `{ label, color }` entries, e.g. `DEFAULT_COLORS`) for a colour setting of the
+  plugin, like the X-ray colour row; the swatch equal to `get()` is marked, a click calls
+  `set(color)`. Returns a function that removes the row.
 - `ui.models.addFileHandler((file) => boolean)` lets the plugin claim files opened with the Models
   panel's file picker or dropped on the viewer: every file is offered to the handlers first, in
   registration order, and one that returns true takes the file (it is then not loaded as a model).
@@ -413,32 +417,12 @@ Here is the whole plugin:
 
 ```ts
 import type { Color, ContextMenuContext, PluginInstance, ViewerPlugin } from 'mk-viewer';
-
-/** A named colour of the "Change colour" submenu. */
-export interface NamedColor {
-  /** Label of the submenu entry. */
-  label: string;
-  /** sRGB colour, components in 0..1. */
-  color: Color;
-}
-
-/** The palette the submenu lists by default. */
-export const DEFAULT_COLORS: readonly NamedColor[] = Object.freeze(
-  (
-    [
-      ['Red', [1, 0, 0]],
-      ['Orange', [1, 0.5, 0]],
-      ['Yellow', [1, 0.9, 0]],
-      ['Green', [0, 0.7, 0.2]],
-      ['Cyan', [0, 0.8, 0.9]],
-      ['Blue', [0.1, 0.4, 1]],
-      ['Purple', [0.6, 0.2, 0.9]],
-      ['Magenta', [1, 0.2, 0.7]],
-      ['Grey', [0.5, 0.5, 0.5]],
-      ['White', [1, 1, 1]],
-    ] as [string, Color][]
-  ).map(([label, color]) => Object.freeze({ label, color: Object.freeze(color) as Color })),
-);
+// the palette: `NamedColor` is `{ label, color }`, `DEFAULT_COLORS` the frozen default colour set
+// (Red, Orange, ..., White). It lives in src/colors (shared with the settings panel's swatches)
+// and the plugin re-exports it; in your own plugin, import both from 'mk-viewer'.
+import { DEFAULT_COLORS, type NamedColor } from '../../colors';
+export { DEFAULT_COLORS } from '../../colors';
+export type { NamedColor } from '../../colors';
 
 export interface ColorPluginOptions {
   /** Plugin name (`viewer.getPlugin(name)`). Default 'color'. */
@@ -552,7 +536,7 @@ Step by step:
 
 1. **Factory and options.** `colorPlugin(options)` validates its options when it is called, so a bad
    colour fails at the call site, not inside the viewer. The palette (`colors`, default
-   `DEFAULT_COLORS`) is frozen so the plugin's API can hand it out as it is. The plugin object is
+   `DEFAULT_COLORS` from `src/colors`) is frozen so the plugin's API can hand it out as it is. The plugin object is
    just `{ name, install }`.
 2. **Install.** `install` destructures what it needs from the context: the viewer and
    `addContextMenuItem`. It does not touch the DOM, so it works without the built-in UI and in

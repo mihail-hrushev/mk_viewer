@@ -625,8 +625,9 @@ colours (Red, Orange, Yellow, Green, Cyan, Blue, Purple, Magenta, Grey, White, e
 colour it (and everything else selected); **Reset colour** restores the material colour of the
 selected objects, or removes every colour override (`viewer.clearColors()`, also those set by the
 application) when no coloured object is selected. Headless: `apply(ids?, color?)`, `reset(ids?)`,
-`colors`. Options: `colors` (your own `{ label, color }` palette; `DEFAULT_COLORS` is the built-in
-one), `color` (the default of `apply()`), `label`, `resetLabel` (null: no reset entry), `order`,
+`colors`. Options: `colors` (your own `{ label, color }` palette; `DEFAULT_COLORS`, the library's
+default colour set, is the built-in one), `color` (the default of `apply()`), `label`, `resetLabel`
+(null: no reset entry), `order`,
 `name`. The colours are ordinary `setColor` overrides and stay when the plugin is removed.
 
 **Status** (`statusPlugin`): the **Status** toolbar button opens a legend of statuses and states
@@ -797,11 +798,15 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   `ui.search.find(query)` runs a search from code and shows it in the panel; `ui.search.resultIds`
   is the last result.
 - **Settings** opens the settings panel: switches for **Show edges** (`setEdges`), **Selected
-  x-ray** (`setSelectionXray`) and **Ghost hidden** (`setGhostHidden`). A switch turned off and on
-  again keeps the options the setting had.
+  x-ray** (`setSelectionXray`) and **Ghost hidden** (`setGhostHidden`), and the **X-ray colour**
+  swatches (Default plus the colour plugin's default set, `DEFAULT_COLORS`) that pick the colour of
+  the selected x-ray lines and turn the x-ray on. A switch turned off and on again keeps the
+  options the setting had, including the chosen colour.
   The rows re-read their state when the panel opens, so settings changed from code show right.
   `ui.settings.addToggle({ label, title, get, set })` adds a switch for a setting of your own and
-  returns a function that removes it; `ui.settings.refresh()` re-reads every row.
+  `ui.settings.addColors({ label, title, colors, get, set })` a row of colour swatches (the one
+  equal to `get()` is marked); both return a function that removes the row.
+  `ui.settings.refresh()` re-reads every row.
 - All panels are `.mkv-panel` windows: drag the header to move them, and the grip in the footer's
   corner to resize them; they stay inside the canvas. `new Panel(ui.element, { title, dock, height,
   resizable })` creates more of them for your own content.

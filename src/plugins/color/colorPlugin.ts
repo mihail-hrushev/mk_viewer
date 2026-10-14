@@ -16,32 +16,11 @@
  */
 import type { Color, ContextMenuContext } from '../../types';
 import type { PluginInstance, ViewerPlugin } from '../types';
+import { DEFAULT_COLORS, type NamedColor } from '../../colors';
 
-/** A named colour of the "Change colour" submenu. */
-export interface NamedColor {
-  /** Label of the submenu entry. */
-  label: string;
-  /** sRGB colour, components in 0..1. */
-  color: Color;
-}
-
-/** The palette the submenu lists by default. */
-export const DEFAULT_COLORS: readonly NamedColor[] = Object.freeze(
-  (
-    [
-      ['Red', [1, 0, 0]],
-      ['Orange', [1, 0.5, 0]],
-      ['Yellow', [1, 0.9, 0]],
-      ['Green', [0, 0.7, 0.2]],
-      ['Cyan', [0, 0.8, 0.9]],
-      ['Blue', [0.1, 0.4, 1]],
-      ['Purple', [0.6, 0.2, 0.9]],
-      ['Magenta', [1, 0.2, 0.7]],
-      ['Grey', [0.5, 0.5, 0.5]],
-      ['White', [1, 1, 1]],
-    ] as [string, Color][]
-  ).map(([label, color]) => Object.freeze({ label, color: Object.freeze(color) as Color })),
-);
+// the palette lives in src/colors (shared with the settings panel); still part of the plugin's API
+export { DEFAULT_COLORS } from '../../colors';
+export type { NamedColor } from '../../colors';
 
 export interface ColorPluginOptions {
   /** Plugin name (`viewer.getPlugin(name)`). Default 'color'. */

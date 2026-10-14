@@ -43,6 +43,11 @@ const CSS = `
 .mkv-panel .mkv-switch input:checked{background:#1a73e8}
 .mkv-panel .mkv-switch input:checked::before{left:18px}
 .mkv-panel .mkv-switch input:focus-visible{outline:2px solid #8ab4f8;outline-offset:2px}
+.mkv-colors-label{cursor:default;min-height:28px}
+.mkv-colors{display:flex;flex-wrap:wrap;gap:6px}
+.mkv-panel .mkv-color{box-sizing:border-box;flex:0 0 22px;width:22px;height:22px;min-width:0;min-height:0;padding:0;border-radius:50%;border:2px solid transparent;cursor:pointer;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.mkv-panel .mkv-color.mkv-on{border-color:#fff;box-shadow:0 0 0 2px #1a73e8}
+.mkv-panel .mkv-color:focus-visible{outline:2px solid #8ab4f8;outline-offset:2px}
 .mkv-panel progress{flex:1;min-width:60px}
 .mkv-errors{color:#ff8a80;white-space:pre-wrap}
 .mkv-errors:empty,.mkv-footer:empty{display:none}

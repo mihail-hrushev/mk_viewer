@@ -5,7 +5,7 @@ export { ModelsPanel } from './ModelsPanel';
 export { PropertiesPanel } from './PropertiesPanel';
 export { SearchPanel } from './SearchPanel';
 export { SettingsPanel } from './SettingsPanel';
-export type { SettingsToggle } from './SettingsPanel';
+export type { SettingsToggle, SettingsColors } from './SettingsPanel';
 export { Panel } from './Panel';
 export type { PanelOptions } from './Panel';
 export { ContextMenu } from './ContextMenu';
