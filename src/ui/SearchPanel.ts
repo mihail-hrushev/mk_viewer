@@ -4,7 +4,8 @@
  * found, ready to copy), a prefix, a regular expression or a numeric range. The result's objectIds can be selected,
  * isolated, framed or coloured; they stay the `Float64Array` the index returns.
  */
-import type { PropertySearch, ViewerApi } from '../types';
+import type { Color, PropertySearch, ViewerApi } from '../types';
+import { DEFAULT_COLORS } from '../colors';
 import type { PropertyQuery } from '../loaders/types';
 import { Panel } from './Panel';
 
@@ -35,7 +36,7 @@ export class SearchPanel {
   private readonly missingSummary: HTMLElement;
   private readonly missingList: HTMLElement;
   private readonly actions: HTMLElement;
-  private readonly colorInput: HTMLInputElement;
+  private readonly colorSelect: HTMLSelectElement;
   private readonly unsubscribe: (() => void)[] = [];
   /** objectIds of the last search (never converted to a JS array). */
   private result: Float64Array = NO_IDS;
@@ -113,16 +114,23 @@ export class SearchPanel {
     copy.title = 'Copy the values that were not found, one per line';
     this.missingBox.append(this.missingSummary, this.missingList, this.row(copy));
 
-    this.colorInput = doc.createElement('input');
-    this.colorInput.type = 'color';
-    this.colorInput.value = '#ff5722';
-    this.colorInput.title = 'Colour for "Colour"';
+    // the colour "Colour" applies: a dropdown of the default colour set (the index is the value)
+    this.colorSelect = doc.createElement('select');
+    this.colorSelect.className = 'mkv-field';
+    this.colorSelect.title = 'Colour for "Colour"';
+    DEFAULT_COLORS.forEach((c, i) => {
+      const o = doc.createElement('option');
+      o.value = String(i);
+      o.textContent = c.label;
+      this.colorSelect.append(o);
+    });
+    this.colorSelect.value = String(Math.max(0, DEFAULT_COLORS.findIndex((c) => c.label === 'Orange')));
     this.actions = this.row(
       this.button('Select', () => this.viewer.select(this.result)),
       this.button('Isolate', () => this.viewer.isolate(this.result)),
       this.button('Fit', () => this.viewer.fitToView(this.result, true)),
       this.button('Colour', () => this.viewer.setColor(this.result, this.pickedColor())),
-      this.colorInput,
+      this.colorSelect,
       this.button('Clear colour', () => this.viewer.setColor(this.result, null)),
     );
 
@@ -322,11 +330,9 @@ export class SearchPanel {
     });
   }
 
-  /** The colour input as sRGB 0..1. */
-  private pickedColor(): [number, number, number] {
-    const hex = this.colorInput.value;
-    const v = parseInt(hex.slice(1), 16);
-    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+  /** The colour chosen in the dropdown (sRGB 0..1). */
+  private pickedColor(): Color {
+    return DEFAULT_COLORS[Number(this.colorSelect.value)]?.color ?? DEFAULT_COLORS[0].color;
   }
 }
 

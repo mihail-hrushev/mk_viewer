@@ -794,7 +794,7 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
   `$` pin it to the whole value) or **range** (min / max). **Find** (or Enter) reports "N of M values found, K
   objects" for a list, with the values that were not found in a collapsible list and a **Copy
   missing** button (one per line), or "K objects in N nodes" otherwise. **Select**, **Isolate**,
-  **Fit**, **Colour** (with a colour picker) and **Clear colour** act on the result.
+  **Fit**, **Colour** (with a dropdown of the default colour set, `DEFAULT_COLORS`) and **Clear colour** act on the result.
   `ui.search.find(query)` runs a search from code and shows it in the panel; `ui.search.resultIds`
   is the last result.
 - **Settings** opens the settings panel: switches for **Show edges** (`setEdges`), **Selected
