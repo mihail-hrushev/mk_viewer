@@ -1278,7 +1278,8 @@ export class Renderer {
       const canvas = this.ctx.canvas as HTMLCanvasElement;
       const dpr = t.height / (canvas.clientHeight || t.height);
       const o = this.overlay;
-      const width = sel && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * (dpr > 0 ? dpr : 1))) : 0;
+      // the x-ray draws the whole silhouette in its own colour: no selection outline under it
+      const width = sel && !xray && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * (dpr > 0 ? dpr : 1))) : 0;
       const tint = sel || this.host.highlightActive;
       this.overlayScratch.selectionTint = tint ? o.selectionTint : Renderer.NO_TINT;
       this.overlayScratch.highlightTint = tint ? o.highlightTint : Renderer.NO_TINT;

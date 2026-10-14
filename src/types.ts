@@ -688,8 +688,9 @@ export interface ViewerApi {
    * pixels wide. Found on a second
    * image that holds only the selected objects. Independent of the edge display. Costs an id +
    * depth target of its own and a pass over the draw items that hold selected objects whenever the
-   * view or the selection changes. Defaults: the selection outline colour `[1, 0.62, 0.1]`,
-   * opacity 1, width 2. Default off.
+   * view or the selection changes. While on, the lines replace the selection outline (the selection
+   * tint stays). Defaults: the selection outline colour `[1, 0.62, 0.1]`, opacity 1, width 2.
+   * Default off.
    */
   setSelectionXray(enabled: boolean, options?: SelectionXrayOptions): void;
   /** The active selection x-ray settings, or null when it is off. */

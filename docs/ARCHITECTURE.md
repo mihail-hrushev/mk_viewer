@@ -214,8 +214,9 @@ since nothing is shaded), submitting only the draw items that hold a selected fr
 `FragmentList.item`, cached until the selection or the batching version changes) in full, so the
 vertex shader drops the other members. The target persists like the main one: it is redrawn only
 for a new image (camera), a selection change, a batching change or a resize, not for every still
-frame. The lines are then blended over the presented image in a fullscreen pass, after the
-selection outline, so they show through whatever occludes the selection.
+frame. The lines are then blended over the presented image in a fullscreen pass, so they show
+through whatever occludes the selection; the composite pass skips the selection outline while the
+x-ray is on, so the selection has one border in the x-ray colour.
 
 ## Picking and overlays
 

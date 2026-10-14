@@ -358,7 +358,8 @@ new Viewer(canvas, { selectionXray: true });      // or selectionXray: { color: 
 - Options: `color` (sRGB, default the selection outline colour, orange), `opacity` (0..1, default
   1), `width` (line width in CSS pixels, 1..8, default 2; the line straddles the border, half on
   each side).
-- The selection tint and outline stay as they are; the x-ray lines are drawn over them.
+- The x-ray lines replace the selection outline while they are on, so the selection has one
+  border in the chosen colour; the selection tint stays and the lines are drawn over it.
 - Cost while on and something is selected: an id + depth target of its own (8 bytes per pixel,
   16 MB at 1920x1080) and, whenever the view or the selection changes, one pass over the draw
   items that hold selected objects (a merged batch is drawn whole, its other objects are dropped
