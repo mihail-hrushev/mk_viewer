@@ -160,6 +160,22 @@ export interface SelectionXrayInfo {
   width: number;
 }
 
+/** Options of `getScreenshot`. */
+export interface ScreenshotOptions {
+  /** Image MIME type the browser encodes: 'image/png' (default), 'image/jpeg' or 'image/webp'. */
+  type?: string;
+  /** Encoder quality in 0..1 for lossy types (jpeg, webp). Browser default when absent. */
+  quality?: number;
+}
+
+/** Raw pixels of a screenshot (`getScreenshotPixels`): the layout of an `ImageData`. */
+export interface ScreenshotPixels {
+  width: number;
+  height: number;
+  /** sRGB RGBA, 8 bits per channel, rows from the top, `width * height * 4` bytes. */
+  data: Uint8ClampedArray;
+}
+
 /** The active environment (`getEnvironment`, `environment` event). */
 export interface EnvironmentInfo {
   /** 'studio', the file name / last URL segment, or 'environment' for bytes and raw pixels. */
@@ -705,6 +721,22 @@ export interface ViewerApi {
   setGhostHidden(enabled: boolean): void;
   /** Whether the ghost-hidden mode is on. */
   getGhostHidden(): boolean;
+
+  // --- screenshots ---
+  /**
+   * Renders the scene as it is now (camera, selection, colours, edges, x-ray, section planes,
+   * environment) at `width` x `height` pixels and returns the encoded image. The aspect ratio of
+   * the image is `width / height`: the vertical field of view is kept, so a wider image shows more
+   * at the sides. Rendered synchronously in full (nothing dropped for the frame budget; the pixel
+   * culling threshold applies to image pixels, so a large image shows more detail than the
+   * canvas), then encoded by the browser (`OffscreenCanvas` or a canvas element). The canvas
+   * image restarts afterwards. Both sides are integers from 1 to the GPU's texture size limit
+   * (RangeError otherwise, the message names the limit); an image costs about 16 bytes per pixel
+   * of GPU memory while it is made (4000 x 3000: 190 MB) plus the pixels in JS.
+   */
+  getScreenshot(width: number, height: number, options?: ScreenshotOptions): Promise<Blob>;
+  /** The same image as raw pixels (an `ImageData` layout: sRGB RGBA, rows from the top). Synchronous. */
+  getScreenshotPixels(width: number, height: number): ScreenshotPixels;
 
   // --- tools and plugins ---
   /**

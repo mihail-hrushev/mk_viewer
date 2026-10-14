@@ -218,6 +218,19 @@ frame. The lines are then blended over the presented image in a fullscreen pass,
 through whatever occludes the selection; the composite pass skips the selection outline while the
 x-ray is on, so the selection has one border in the x-ray colour.
 
+**Screenshots** (`getScreenshot`, `getScreenshotPixels`) reuse the frame path on targets of their
+own: `Renderer.renderImage` swaps the active scene target for one of the requested size (normals
+included when the edge display is on), sets the camera viewport to it (the aspect ratio of the
+image, vertical field of view kept), starts a new image and runs the still pass with an unlimited
+budget until the draw list is exhausted, with the pixel culling threshold applied to image pixels
+(`cullScale`), so a large image shows the detail its size can hold. The present pass then runs
+into a colour-only `ColorTarget` instead of the canvas (`presentInto`) with the overlay widths
+scaled by image height over canvas height (`overlayScale`), the pixels are read back synchronously
+and both targets are disposed. The canvas image restarts at the next frame, since the draw list,
+the stamps, the x-ray target and the camera viewport were used for the screenshot; the picking
+matrices of the canvas image are saved and restored. The Viewer flips the rows and encodes the
+image with `OffscreenCanvas` (or a canvas element).
+
 ## Picking and overlays
 
 The id attachment stores fragment index + 1. `pick()` reads one pixel asynchronously (PBO +

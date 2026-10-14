@@ -393,6 +393,32 @@ new Viewer(canvas, { ghostHidden: true });
 exposes timer queries), `meshes`, `triangles`, `drawItems`, `drawCalls`, `trianglesDrawn`, `progress`
 (0..1 of the current image) and `gpuMemoryBytes`.
 
+### Screenshots
+
+`viewer.getScreenshot(width, height, options?)` renders the scene as it is now (camera, selection,
+colours, edges, x-ray, section planes, environment) at `width` x `height` pixels and resolves with
+the encoded image (`options.type`: `'image/png'` by default, `'image/jpeg'` or `'image/webp'`,
+with `options.quality` in 0..1 for the lossy ones). The aspect ratio of the image is
+`width / height`: the vertical field of view is kept, so a wider image shows more at the sides.
+The image is rendered synchronously in full (nothing is dropped for the frame budget; the pixel
+culling threshold applies to image pixels, so a large image shows more detail than the canvas),
+then encoded by the browser; the canvas image restarts afterwards. Both sides are integers from 1
+to the GPU's texture size limit (RangeError otherwise, the message names the limit); an image
+costs about 16 bytes per pixel of GPU memory while it is made (4000 x 3000: 190 MB) plus the
+pixels in JS. `viewer.getScreenshotPixels(width, height)` gives the same image as raw pixels
+(`{ width, height, data }`, an `ImageData` layout: sRGB RGBA, rows from the top), synchronously.
+The built-in **Screenshot** plugin (below) wraps this in a panel.
+
+```ts
+const blob = await viewer.getScreenshot(4000, 3000);                   // a PNG
+const jpeg = await viewer.getScreenshot(1920, 1080, { type: 'image/jpeg', quality: 0.9 });
+const a = document.createElement('a');
+a.href = URL.createObjectURL(blob);
+a.download = 'view.png';
+a.click();
+const { width, height, data } = viewer.getScreenshotPixels(800, 600);  // Uint8ClampedArray, width * height * 4
+```
+
 ## Loading models and federation
 
 Loader plugins are registered explicitly, so only the formats you import are bundled. From
@@ -593,7 +619,8 @@ const viewer = new Viewer(canvas, {
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
   // selectionPlugin adds the "Selection" button: the selection level and Parent / Child / Leaf / Sibling
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin()],
+  // screenshotPlugin adds the "Screenshot" button: the view rendered at a chosen size, opened in a new tab
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()],
 });
 ```
 
@@ -734,6 +761,25 @@ const viewer = new Viewer(canvas, {
 const sel = viewer.getPlugin<SelectionPlugin>('selection')!;
 sel.setLevel(1);   // clicks now select whole spools
 sel.parent();      // the selection grows to the parents of its selected nodes
+```
+
+**Screenshot** (`screenshotPlugin`): the **Screenshot** toolbar button opens a small panel with a
+width and a height in pixels (4000 x 3000 to start with) and a **Screenshot** button that renders
+the current view at that size with `viewer.getScreenshot` (see *Screenshots* above) and opens the
+image in a new browser tab; the line under the button shows the progress, then the size, the file
+size and the time taken, or the error (a size beyond the GPU limit, for instance). The tab is
+opened on the click, before the render, so that popup blockers let it through; when the browser
+blocks it anyway the panel shows an **Open screenshot** link instead. Headless: `width` and
+`height` (the current size; the panel's inputs follow them), `capture(width?, height?)`
+(`viewer.getScreenshot` with the plugin's type and quality, resolves with the blob) and
+`open(width?, height?)` (capture, then show it in a new tab; rejects without a window). Options:
+`width`, `height` (positive integers), `type` (`'image/png'` by default), `quality`, `label`, `ui`
+(false: no button and no panel), `name`.
+
+```ts
+const shot = viewer.getPlugin<ScreenshotPlugin>('screenshot')!;
+const blob = await shot.capture(1920, 1080);   // the encoded image, nothing opened
+await shot.open();                             // the panel's size, in a new tab
 ```
 
 ## Controls

@@ -254,6 +254,10 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     getSelectionXray: () => null,
     setGhostHidden: () => {},
     getGhostHidden: () => false,
+    getScreenshotPixels: () => {
+      throw new Error('not supported');
+    },
+    getScreenshot: () => Promise.reject(new Error('not supported')),
     on: () => () => {},
     resize() {},
     invalidate() {},

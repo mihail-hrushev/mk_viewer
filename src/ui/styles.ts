@@ -31,6 +31,7 @@ const CSS = `
 .mkv-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .mkv-grow{flex:1 1 120px;overflow-wrap:anywhere}
 .mkv-dim{color:#9aa0a6;font-size:12px}
+.mkv-panel a{color:#8ab4f8}
 .mkv-btn.mkv-outline{border-color:#5f6368;background:#303338}
 .mkv-btn.mkv-outline:hover{background:#3c4043}
 .mkv-model-item{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-top:1px solid #3c4043}

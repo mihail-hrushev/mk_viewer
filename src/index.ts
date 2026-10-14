@@ -53,6 +53,8 @@ export type {
   EdgeInfo,
   SelectionXrayOptions,
   SelectionXrayInfo,
+  ScreenshotOptions,
+  ScreenshotPixels,
   ViewerStats,
   ViewerEvents,
   Primitives,

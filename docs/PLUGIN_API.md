@@ -78,9 +78,9 @@ export function pickLogPlugin(): ViewerPlugin {
 **Registering.** An application installs plugins when it creates the viewer, or later:
 
 ```ts
-import { Viewer, createViewerUi, colorPlugin, measurePlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
+import { Viewer, createViewerUi, colorPlugin, measurePlugin, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from 'mk-viewer';
 
-const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin()] }); // in this order
+const viewer = new Viewer(canvas, { plugins: [measurePlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()] }); // in this order
 createViewerUi(viewer);                                         // optional built-in UI
 const measure = viewer.getPlugin<MeasurePlugin>('measure')!;     // a plugin's own API
 viewer.use(pickLogPlugin());                                    // later: returns the instance
@@ -570,7 +570,7 @@ Registering it, as [`examples/models.ts`](../examples/models.ts) does (try it on
 
 ```ts
 const viewer = new Viewer(canvas, {
-  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin()],
+  plugins: [measurePlugin({ decimals: 3 }), sectionPlugin(), colorPlugin(), statusPlugin(), setsPlugin(), selectionPlugin(), screenshotPlugin()],
 });
 const ui = createViewerUi(viewer); // draws the context menu
 ```
@@ -664,6 +664,13 @@ status.applyColors(['Erection']);                           // setColor per stat
 searches (a key and pasted values, `viewer.findObjects` with `in`), each with its count, missing
 values and select / isolate / remove, re-resolved when models change. Read it for the minimal
 version of a panel plugin over an asynchronous headless API.
+
+`screenshotPlugin()` (`src/plugins/screenshot/`) is the smallest panel plugin: two inputs (width
+and height in pixels), one button and one API call (`viewer.getScreenshot`), with the image opened
+in a new tab. Its one subtlety is browser etiquette rather than viewer API: the tab is opened
+synchronously in the click's task, before the render, so a popup blocker lets it through, and the
+panel falls back to a link when it is blocked anyway. Read it for the bare skeleton of a `ui(ui)`
+hook: toolbar toggle, `Panel`, `mkv-field` inputs, an `mkv-dim` message line, cleanup.
 
 `selectionPlugin()` (`src/plugins/selection/`) changes what a **click** selects without being a
 tool: it installs a **selection resolver** (`viewer.setSelectionResolver(hit => objectIds | null)`),

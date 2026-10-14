@@ -23,3 +23,5 @@ export { setsPlugin, parseSetValues } from './sets/setsPlugin';
 export type { SetsPlugin, SetsPluginOptions, PropertySet, SetsEvents } from './sets/setsPlugin';
 export { selectionPlugin, levelNode, DEFAULT_LEVELS } from './selection/selectionPlugin';
 export type { SelectionPlugin, SelectionPluginOptions, SelectionLevel, SelectedNode, SelectionEvents } from './selection/selectionPlugin';
+export { screenshotPlugin } from './screenshot/screenshotPlugin';
+export type { ScreenshotPlugin, ScreenshotPluginOptions } from './screenshot/screenshotPlugin';

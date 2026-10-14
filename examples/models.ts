@@ -9,8 +9,10 @@
  * menu entries "Change colour" and "Reset colour"), the status plugin (`statusPlugin`, toolbar button "Status":
  * a legend of pasted Tag / Status / State / Colour rows), the sets plugin (`setsPlugin`, toolbar
  * button "Sets": saved property searches), the selection plugin (`selectionPlugin`, toolbar button
- * "Selection": the selection level and Parent / Child / Leaf / Sibling) and a small third-party plugin written
- * against the public API only (./section-plugin.ts, toolbar button "Cut").
+ * "Selection": the selection level and Parent / Child / Leaf / Sibling), the screenshot plugin
+ * (`screenshotPlugin`, toolbar button "Screenshot": the view at a chosen size in a new tab) and a
+ * small third-party plugin written against the public API only (./section-plugin.ts, toolbar
+ * button "Cut").
  *
  *   npm run dev  ->  http://localhost:5173/examples/models.html?url=/path/to/model.glb
  *
@@ -20,7 +22,7 @@
  * (selection x-ray on) and ghost=1 (hidden objects shown faintly); all three are switches of the
  * Settings panel.
  */
-import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
+import { Viewer, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
@@ -34,6 +36,7 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   // setsPlugin adds the "Sets" button: saved property searches (a key and pasted values)
   // selectionPlugin adds the "Selection" button: the selection level (what a click selects; the
   // Spool and Iso levels use the properties of the PCF-derived spool models) and Parent / Child / Leaf / Sibling
+  // screenshotPlugin adds the "Screenshot" button: the view rendered at a chosen size, opened in a new tab
   plugins: [
     measurePlugin({ decimals: 3 }),
     sectionPlugin(),
@@ -43,6 +46,7 @@ const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
     selectionPlugin({
       levels: [{ label: 'Object' }, { label: 'Parent', up: 1 }, { label: 'Spool', key: 'Spool' }, { label: 'Iso', key: 'Spools' }, { label: 'Top', up: Infinity }],
     }),
+    screenshotPlugin(),
   ],
 });
 // built-in UI: bottom toolbar, movable panels (Tree, Models, Properties, Search, Settings), right-click menu

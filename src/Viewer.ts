@@ -44,6 +44,8 @@ import type {
   ContextMenuRequest,
   EdgeInfo,
   EdgeOptions,
+  ScreenshotOptions,
+  ScreenshotPixels,
   SelectionXrayInfo,
   SelectionXrayOptions,
   EnvironmentInfo,
@@ -1102,6 +1104,25 @@ export class Viewer implements ViewerApi {
     return x ? { color: [x.color[0], x.color[1], x.color[2]], opacity: x.opacity, width: x.width } : null;
   }
 
+  getScreenshotPixels(width: number, height: number): ScreenshotPixels {
+    if (this.disposed) throw new Error('mk-viewer: the viewer is disposed');
+    const max = this.renderer.maxImageSize;
+    for (const [name, v] of [['width', width], ['height', height]] as const) {
+      if (!Number.isInteger(v) || v < 1 || v > max) {
+        throw new RangeError(`mk-viewer: screenshot ${name} must be an integer from 1 to ${max} pixels, got ${v}`);
+      }
+    }
+    const data = new Uint8ClampedArray(width * height * 4);
+    this.renderer.renderImage(width, height, data);
+    flipRows(data, width, height);
+    return { width, height, data };
+  }
+
+  async getScreenshot(width: number, height: number, options: ScreenshotOptions = {}): Promise<Blob> {
+    const image = this.getScreenshotPixels(width, height);
+    return encodeImage(image, options.type ?? 'image/png', options.quality);
+  }
+
   setGhostHidden(enabled: boolean): void {
     if (this.disposed) return;
     this.ghostHidden = enabled;
@@ -1841,6 +1862,44 @@ function environmentOptions(o: EnvironmentOptions): { intensity: number; rotatio
 
 function copyEdgeInfo(e: EdgeInfo | null): EdgeInfo | null {
   return e ? { color: [e.color[0], e.color[1], e.color[2]], opacity: e.opacity, creaseAngle: e.creaseAngle } : null;
+}
+
+/** Turns GL's bottom-up rows into the top-down rows of an ImageData, in place. */
+function flipRows(data: Uint8ClampedArray, width: number, height: number): void {
+  const stride = width * 4;
+  const row = new Uint8ClampedArray(stride);
+  for (let y = 0, z = height - 1; y < z; y++, z--) {
+    const a = data.subarray(y * stride, (y + 1) * stride);
+    const b = data.subarray(z * stride, (z + 1) * stride);
+    row.set(a);
+    a.set(b);
+    b.set(row);
+  }
+}
+
+/** Encodes screenshot pixels with the browser's image encoder (OffscreenCanvas, else a canvas element). */
+async function encodeImage(image: ScreenshotPixels, type: string, quality: number | undefined): Promise<Blob> {
+  const { width, height, data } = image;
+  if (typeof ImageData !== 'function') throw new Error('mk-viewer: getScreenshot needs a browser to encode the image; use getScreenshotPixels');
+  const pixels = new ImageData(data as Uint8ClampedArray<ArrayBuffer>, width, height);
+  if (typeof OffscreenCanvas === 'function') {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.putImageData(pixels, 0, 0);
+      return canvas.convertToBlob({ type, quality });
+    }
+  }
+  if (typeof document === 'undefined') throw new Error('mk-viewer: getScreenshot needs a browser to encode the image; use getScreenshotPixels');
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('mk-viewer: getScreenshot could not get a 2d canvas context to encode the image');
+  ctx.putImageData(pixels, 0, 0);
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error(`mk-viewer: the browser could not encode the screenshot as ${type}`))), type, quality);
+  });
 }
 
 function xrayOptions(o: SelectionXrayOptions): SelectionXrayInfo {

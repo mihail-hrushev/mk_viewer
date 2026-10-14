@@ -28,6 +28,7 @@ export type { EnvironmentUniforms, LightingParams, UberPass } from './UberProgra
 export { EnvironmentTexture } from './EnvironmentTexture';
 export type { EnvironmentTextureLevel } from './EnvironmentTexture';
 export { RenderTargets } from './RenderTargets';
+export { ColorTarget } from './ColorTarget';
 export type { DrawBufferMode } from './RenderTargets';
 export { PostPasses } from './PostPasses';
 export type { EdgeStyle, OverlayStyle } from './PostPasses';

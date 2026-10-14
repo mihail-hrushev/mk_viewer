@@ -43,6 +43,7 @@
 import type { ViewerStats } from '../types';
 import { DETAIL_STEPS, DrawList, ITEM_FREE, ITEM_INSTANCED, type CullView, type Scene } from '../core';
 import {
+  ColorTarget,
   DrawSubmitter,
   EnvironmentTexture,
   GpuTimer,
@@ -151,7 +152,18 @@ const UPLOAD_SKIP_BYTES = 4 * 1024 * 1024;
 
 export class Renderer {
   readonly gpu: GpuScene;
-  readonly targets: RenderTargets;
+  /** The scene target of the canvas image; `targets` while no screenshot is being rendered. */
+  private readonly mainTargets: RenderTargets;
+  /** The scene target the passes draw into: the canvas image's, or a screenshot's (`renderImage`). */
+  private active: RenderTargets;
+  get targets(): RenderTargets {
+    return this.active;
+  }
+  /**
+   * Target pixels per CSS pixel of the screenshot being rendered (`renderImage`), 0 otherwise. The
+   * overlay widths scale with it like with the device pixel ratio; culling uses image pixels.
+   */
+  private shotScale = 0;
   readonly budget: BudgetController;
   readonly list = new DrawList();
   readonly stats: ViewerStats = {
@@ -324,7 +336,7 @@ export class Renderer {
     this.gl = ctx.gl;
     this.gpu = new GpuScene(ctx);
     this.prog = this.variants[0] = new UberProgram(ctx);
-    this.targets = new RenderTargets(ctx);
+    this.active = this.mainTargets = new RenderTargets(ctx);
     this.post = new PostPasses(ctx);
     this.reader = new PixelReader(ctx);
     this.timer = new GpuTimer(ctx);
@@ -335,9 +347,7 @@ export class Renderer {
     // near plane from visible content: distant sub-pixel content must not push it out
     camera.visibleDepth = (fz0, fz1, fz2, fz3, pixelScale) => {
       const e = camera.eye;
-      const canvas = this.ctx.canvas as HTMLCanvasElement;
-      const dpr = this.targets.height / (canvas.clientHeight || this.targets.height);
-      return scene.bvh.visibleDepthMax(scene.items, fz0, fz1, fz2, fz3, e[0], e[1], e[2], pixelScale / (dpr > 0 ? dpr : 1), 0.5, this.ghostHidden);
+      return scene.bvh.visibleDepthMax(scene.items, fz0, fz1, fz2, fz3, e[0], e[1], e[2], pixelScale / this.cullScale(), 0.5, this.ghostHidden);
     };
     this.offRestored = ctx.on('restored', () => {
       this.budget.resetCeiling();
@@ -553,6 +563,92 @@ export class Renderer {
     return { meshId: s.id, position: Float64Array.from(pos), distance: Math.sqrt(dx * dx + dy * dy + dz * dz) };
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // screenshots
+
+  /** Largest side of a screenshot (`renderImage`): the GPU's texture size limit. */
+  get maxImageSize(): number {
+    return this.ctx.caps.maxTextureSize;
+  }
+
+  /**
+   * Renders the scene as it is now at `width` x `height` pixels into `out` (RGBA8, sRGB, rows from
+   * the bottom, `width * height * 4` bytes), synchronously and in full: the still pass over a scene
+   * target of that size with the camera's pose and the image's aspect ratio (vertical field of
+   * view kept), nothing dropped for the frame budget, the pixel culling threshold in image pixels,
+   * then the present-time overlays (tint, outline, edges, x-ray; their widths scaled like the
+   * device pixel ratio, by image height over canvas height) into a colour target, read back.
+   * Costs a scene target plus a colour target of that size (16 bytes per pixel, the x-ray target's
+   * 8 more while it is on) for the duration of the call. The canvas image is restarted afterwards,
+   * since the draw list, the stamps and the camera viewport were used for the screenshot.
+   */
+  renderImage(width: number, height: number, out: Uint8Array | Uint8ClampedArray): void {
+    if (this.ctx.isLost) throw new Error('mk-viewer: the WebGL context is lost');
+    const scene = this.scene;
+    const cam = this.camera;
+    // pending meshes are part of the picture
+    scene.flush();
+    this.gpu.sync(scene);
+    const main = this.mainTargets;
+    const canvas = this.ctx.canvas as HTMLCanvasElement;
+    const savedW = cam.width;
+    const savedH = cam.height;
+    const savedInv = Float64Array.from(this.imgInvViewProj);
+    const savedEye = Float64Array.from(this.imgEye);
+    const shot = new RenderTargets(this.ctx);
+    const output = new ColorTarget(this.ctx);
+    try {
+      shot.setNormals(main.hasNormals);
+      shot.resize(width, height);
+      output.resize(width, height);
+      this.active = shot;
+      const scale = height / (canvas.clientHeight || height);
+      this.shotScale = scale > 0 ? scale : 1;
+      cam.setViewport(width, height);
+      this.ensurePrograms();
+      this.newImage();
+      this.traverse(this.opts.cullPixelSizeStill);
+      for (let k = 0; k < 8 && this.phase < PHASE_DONE; k++) this.drawStill(Infinity);
+      this.presentInto(output.framebuffer, width, height);
+      output.readPixels(out);
+    } finally {
+      this.active = main;
+      this.shotScale = 0;
+      cam.setViewport(savedW, savedH);
+      this.imgInvViewProj.set(savedInv);
+      this.imgEye.set(savedEye);
+      shot.dispose();
+      output.dispose();
+      this.ctx.state.bindFramebuffer(null);
+      // the canvas image restarts: its list, stamps and x-ray target were replaced
+      this.xrayDirty = true;
+      this.invalid = true;
+      this.budgetSkip = 2; // the frame after a screenshot is slow for reasons other than draw work
+      this.lastT = 0;
+      this.wake();
+    }
+  }
+
+  /** Target pixels per CSS pixel for culling thresholds: 1 for a screenshot (image pixels). */
+  private cullScale(): number {
+    if (this.shotScale > 0) return 1;
+    return this.canvasScale();
+  }
+
+  /** Target pixels per CSS pixel for overlay widths (outline, x-ray lines). */
+  private overlayScale(): number {
+    if (this.shotScale > 0) return this.shotScale;
+    return this.canvasScale();
+  }
+
+  /** The device pixel ratio of the canvas image (scene target height over CSS height). */
+  private canvasScale(): number {
+    const canvas = this.ctx.canvas as HTMLCanvasElement;
+    const t = this.mainTargets;
+    const dpr = t.height / (canvas.clientHeight || t.height);
+    return dpr > 0 ? dpr : 1;
+  }
+
   /** Idle state check (tests / examples): nothing scheduled and the image is complete. */
   get idle(): boolean {
     return this.raf === 0 && this.phase === PHASE_DONE;
@@ -570,7 +666,7 @@ export class Renderer {
     this.offRestored();
     this.gpu.dispose();
     for (const v of this.variants) v?.dispose();
-    this.targets.dispose();
+    this.mainTargets.dispose();
     this.xrayTargets?.dispose();
     this.post.dispose();
     this.reader.dispose();
@@ -861,9 +957,7 @@ export class Renderer {
     eye[1] = cam.eye[1];
     eye[2] = cam.eye[2];
     cv.orthographic = cam.orthographic;
-    const canvas = this.ctx.canvas as HTMLCanvasElement;
-    const dpr = this.targets.height / (canvas.clientHeight || this.targets.height);
-    cv.pixelScale = cam.pixelFactor / (dpr > 0 ? dpr : 1);
+    cv.pixelScale = cam.pixelFactor / this.cullScale();
     cv.pixelThreshold = threshold;
     cv.includeHidden = this.ghostHidden;
     this.scene.traverse(cv, this.list);
@@ -1260,26 +1354,34 @@ export class Renderer {
   }
 
   private present(): void {
-    const gl = this.gl;
-    const s = this.ctx.state;
     this.presentPending = false;
     this.presentCount++;
+    this.presentInto(null, this.gl.drawingBufferWidth, this.gl.drawingBufferHeight);
+  }
+
+  /**
+   * Presents the active scene target into `fb` (null: the canvas) of `width` x `height` pixels:
+   * the composite with the overlays and the edge display, or the plain present, then the x-ray
+   * lines.
+   */
+  private presentInto(fb: WebGLFramebuffer | null, width: number, height: number): void {
+    const gl = this.gl;
+    const s = this.ctx.state;
     const t = this.targets;
     const sel = this.host.selectionCount > 0;
     const xray = sel && this.xray !== null;
-    if (xray) this.drawXray(); // into its own target, before the canvas is bound
-    s.bindFramebuffer(null);
-    s.setViewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    if (xray) this.drawXray(); // into its own target, before the output is bound
+    s.bindFramebuffer(fb);
+    s.setViewport(0, 0, width, height);
     s.setDepthTest(false);
     s.setBlend(false);
     const edges = this.edges !== null && t.normalTex !== null;
     if (sel || this.host.highlightActive || edges) {
       // outline width is in target pixels: scale with the device pixel ratio
-      const canvas = this.ctx.canvas as HTMLCanvasElement;
-      const dpr = t.height / (canvas.clientHeight || t.height);
+      const dpr = this.overlayScale();
       const o = this.overlay;
       // the x-ray draws the whole silhouette in its own colour: no selection outline under it
-      const width = sel && !xray && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * (dpr > 0 ? dpr : 1))) : 0;
+      const width = sel && !xray && o.outlineWidth > 0 ? Math.max(1, Math.round(o.outlineWidth * dpr)) : 0;
       const tint = sel || this.host.highlightActive;
       this.overlayScratch.selectionTint = tint ? o.selectionTint : Renderer.NO_TINT;
       this.overlayScratch.highlightTint = tint ? o.highlightTint : Renderer.NO_TINT;
@@ -1298,9 +1400,7 @@ export class Renderer {
     if (xray) {
       // the border of the selection in the x-ray target over everything; the width is in CSS pixels, the
       // line covers `radius` target pixels on each side of a boundary
-      const canvas = this.ctx.canvas as HTMLCanvasElement;
-      const dpr = t.height / (canvas.clientHeight || t.height);
-      const radius = Math.max(1, Math.round((this.xray!.width * (dpr > 0 ? dpr : 1)) / 2));
+      const radius = Math.max(1, Math.round((this.xray!.width * this.overlayScale()) / 2));
       s.setBlend(true);
       s.setBlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       this.post.drawXray(this.xrayTargets!.idTex!, this.xrayColor, radius);

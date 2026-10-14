@@ -10,6 +10,7 @@ import type { ViewerPlugin } from './types';
 import { measurePlugin, type MeasurePlugin, type Measurement } from './measure/measurePlugin';
 import { clipSegment2D, depthCutT, formatDistance, labelOffset } from './measure/geometry';
 import { colorPlugin, DEFAULT_COLORS, type ColorPlugin } from './color/colorPlugin';
+import { formatBytes, screenshotPlugin, type ScreenshotPlugin } from './screenshot/screenshotPlugin';
 
 let hv: HeadlessViewer | null = null;
 afterEach(() => {
@@ -633,6 +634,98 @@ describe('colour plugin', () => {
     expect(() => colorPlugin({ colors: [{ label: 'x', color: [1, 0] as never }] })).toThrow(/colors\[0\]/);
     expect(() => colorPlugin({ colors: [{ color: [1, 0, 0] } as never] })).toThrow(/label/);
     expect(() => colorPlugin({ colors: [] })).toThrow(/empty/);
+  });
+});
+
+describe('screenshot plugin', () => {
+  /** `viewer.getScreenshot` replaced by a spy (the real one needs GL): resolves with an empty blob. */
+  const spyScreenshot = (v: object) => {
+    const fn = vi.fn((_w: number, _h: number, _o?: unknown) => Promise.resolve(new Blob([])));
+    (v as { getScreenshot: typeof fn }).getScreenshot = fn;
+    return fn;
+  };
+
+  it('installs with default size and option overrides', () => {
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin()] });
+    const p = hv.viewer.getPlugin<ScreenshotPlugin>('screenshot')!;
+    expect(p).toBeDefined();
+    expect(p.width).toBe(4000);
+    expect(p.height).toBe(3000);
+    expect(hv.viewer.plugins).toEqual(['screenshot']);
+    hv.dispose();
+
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin({ name: 'shot', width: 1920, height: 1080 })] });
+    const q = hv.viewer.getPlugin<ScreenshotPlugin>('shot')!;
+    expect(q.width).toBe(1920);
+    expect(q.height).toBe(1080);
+    q.width = 800;
+    q.height = 600;
+    expect([q.width, q.height]).toEqual([800, 600]);
+    expect(() => (q.width = 0)).toThrow(RangeError);
+    expect(() => (q.height = 1.5)).toThrow(RangeError);
+    expect([q.width, q.height]).toEqual([800, 600]);
+  });
+
+  it('validates the size options', () => {
+    expect(() => screenshotPlugin({ width: 0 })).toThrow(RangeError);
+    expect(() => screenshotPlugin({ width: 10.5 })).toThrow(/width must be a positive integer/);
+    expect(() => screenshotPlugin({ height: -1 })).toThrow(RangeError);
+    expect(() => screenshotPlugin({ height: NaN })).toThrow(RangeError);
+    expect(() => screenshotPlugin({ width: 1, height: 1 })).not.toThrow();
+  });
+
+  it('capture() forwards to viewer.getScreenshot with the type and quality', async () => {
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin({ width: 640, height: 480 })] });
+    const v = hv.viewer;
+    const spy = spyScreenshot(v);
+    const p = v.getPlugin<ScreenshotPlugin>('screenshot')!;
+    const blob = await p.capture();
+    expect(blob).toBeInstanceOf(Blob);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]).toEqual([640, 480, { type: 'image/png' }]);
+    await p.capture(100, 50);
+    expect(spy.mock.calls[1]).toEqual([100, 50, { type: 'image/png' }]);
+    hv.dispose();
+
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin({ type: 'image/jpeg', quality: 0.8 })] });
+    const spy2 = spyScreenshot(hv.viewer);
+    await hv.viewer.getPlugin<ScreenshotPlugin>('screenshot')!.capture(10, 20);
+    expect(spy2.mock.calls[0]).toEqual([10, 20, { type: 'image/jpeg', quality: 0.8 }]);
+  });
+
+  it('capture() rejects as the viewer does', async () => {
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin()] });
+    const v = hv.viewer;
+    (v as { getScreenshot: unknown }).getScreenshot = vi.fn(() => Promise.reject(new RangeError('too big')));
+    await expect(v.getPlugin<ScreenshotPlugin>('screenshot')!.capture(1e6, 1e6)).rejects.toThrow(RangeError);
+  });
+
+  it('open() rejects without a browser window; capture is untouched', async () => {
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin()] });
+    const v = hv.viewer;
+    const spy = spyScreenshot(v);
+    const p = v.getPlugin<ScreenshotPlugin>('screenshot')!;
+    await expect(p.open()).rejects.toThrow(/needs a browser window/);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('dispose: removed with the plugin, capture rejects afterwards', async () => {
+    hv = createHeadlessViewer({ plugins: [screenshotPlugin()] });
+    const v = hv.viewer;
+    spyScreenshot(v);
+    const p = v.getPlugin<ScreenshotPlugin>('screenshot')!;
+    expect(v.removePlugin('screenshot')).toBe(true);
+    expect(v.getPlugin('screenshot')).toBeUndefined();
+    await expect(p.capture()).rejects.toThrow(/disposed/);
+    p.dispose!(); // idempotent
+  });
+
+  it('formatBytes', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(64_000)).toBe('64 kB');
+    expect(formatBytes(1_234_567)).toBe('1.2 MB');
+    expect(formatBytes(45_000_000)).toBe('45 MB');
+    expect(formatBytes(2_500_000_000)).toBe('2.50 GB');
   });
 });
 
