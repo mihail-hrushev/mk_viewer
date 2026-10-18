@@ -239,7 +239,10 @@ viewer.on('hover', (hit) => ($('hover').textContent = hit ? `hover: ${names.get(
 changes. `await viewer.pick(x, y)` picks at canvas CSS pixels yourself;
 `await viewer.snap(x, y)` does the same and then moves the point to the nearest vertex or feature
 edge within a screen tolerance (see [viewer plugins](#viewer-plugins-and-the-measurement-tool)).
-`viewer.worldToScreen(point)` projects a world point to canvas CSS pixels. Other events: `camera`,
+`viewer.worldToScreen(point)` projects a world point to canvas CSS pixels; it never reads layout
+(the canvas CSS size is cached on resize). For many points, `viewer.worldToScreenMany(xyz, out?)`
+takes flat x, y, z triples and returns a `Float32Array` of x, y, depth, flags per point (flags:
+`SCREEN_IN_FRONT` | `SCREEN_IN_VIEW`, exported from the package). Other events: `camera`,
 `view` (camera or canvas size changed, inside the animation frame: for positioning overlay DOM),
 `frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`, `pluginInstalled`,
 `pluginRemoved`, `contextMenu` (see [the built-in toolbar](#built-in-toolbar-and-model-tree)). `on()`

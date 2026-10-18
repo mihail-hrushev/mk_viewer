@@ -81,6 +81,7 @@ import type {
 } from './types';
 import type { PluginContext, PluginInstance, ViewerPlugin } from './plugins/types';
 import { createCanvasLayer, type CanvasLayer } from './plugins/overlay';
+import { SCREEN_IN_FRONT, SCREEN_IN_VIEW } from './screenFlags';
 import { SNAP_EDGE, SNAP_VERTEX, Snapper, type SnapQuery } from './core/snap';
 import type { LoaderInput, LoaderPlugin, LoadTask, Model, PropertyKeyInfo, PropertyMatch, PropertyQuery } from './loaders/types';
 import type { LoadContextImpl, ModelImpl } from './loaders/context';
@@ -264,6 +265,13 @@ export class Viewer implements ViewerApi {
   private pointerOver = false;
   private hoverObject: number | null = null;
   private readonly resizeObserver: ResizeObserver | null;
+  /**
+   * Canvas CSS size (clientWidth / clientHeight, 0 while not laid out), cached so per-point helpers
+   * such as `worldToScreen` never read layout. Refreshed by `resize()` (the ResizeObserver calls it)
+   * and, without a ResizeObserver, at the start of every frame.
+   */
+  private cssWidth = 0;
+  private cssHeight = 0;
   private disposed = false;
 
   constructor(canvas: HTMLCanvasElement, options: ViewerOptions = {}) {
@@ -1032,8 +1040,8 @@ export class Viewer implements ViewerApi {
     const cx = m[0] * x + m[4] * y + m[8] * z + m[12];
     const cy = m[1] * x + m[5] * y + m[9] * z + m[13];
     const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
-    const w = this.canvas.clientWidth || cam.width;
-    const h = this.canvas.clientHeight || cam.height;
+    const w = this.cssWidth || cam.width;
+    const h = this.cssHeight || cam.height;
     const inv = cw !== 0 ? 1 / cw : 0;
     res.x = (cx * inv * 0.5 + 0.5) * w;
     res.y = (0.5 - cy * inv * 0.5) * h;
@@ -1043,10 +1051,43 @@ export class Viewer implements ViewerApi {
     return res;
   }
 
+  worldToScreenMany(points: ArrayLike<number>, out?: Float32Array): Float32Array {
+    const n = Math.floor(points.length / 3);
+    const res = out && out.length >= n * 4 ? out : new Float32Array(n * 4);
+    const o = this.origin;
+    const ox = o[0], oy = o[1], oz = o[2];
+    const cam = this.camera;
+    const m = cam.viewProjection64;
+    const v = cam.view64;
+    const m0 = m[0], m1 = m[1], m3 = m[3], m4 = m[4], m5 = m[5], m7 = m[7];
+    const m8 = m[8], m9 = m[9], m11 = m[11], m12 = m[12], m13 = m[13], m15 = m[15];
+    const v2 = v[2], v6 = v[6], v10 = v[10], v14 = v[14];
+    const ortho = cam.orthographic;
+    const w = this.cssWidth || cam.width;
+    const h = this.cssHeight || cam.height;
+    for (let i = 0, j = 0, k = 0; i < n; i++, j += 3, k += 4) {
+      const x = points[j] - ox, y = points[j + 1] - oy, z = points[j + 2] - oz;
+      const cx = m0 * x + m4 * y + m8 * z + m12;
+      const cy = m1 * x + m5 * y + m9 * z + m13;
+      const cw = m3 * x + m7 * y + m11 * z + m15;
+      const inv = cw !== 0 ? 1 / cw : 0;
+      const sx = (cx * inv * 0.5 + 0.5) * w;
+      const sy = (0.5 - cy * inv * 0.5) * h;
+      const depth = -(v2 * x + v6 * y + v10 * z + v14);
+      const inFront = ortho || depth > 0;
+      const inView = inFront && sx >= 0 && sx <= w && sy >= 0 && sy <= h;
+      res[k] = sx;
+      res[k + 1] = sy;
+      res[k + 2] = depth;
+      res[k + 3] = (inFront ? SCREEN_IN_FRONT : 0) | (inView ? SCREEN_IN_VIEW : 0);
+    }
+    return res;
+  }
+
   /** World size of one CSS pixel at origin-relative point (x, y, z) for the current camera. */
   private worldPerPixelAt(x: number, y: number, z: number): number {
     const cam = this.camera;
-    const h = this.canvas.clientHeight || cam.height;
+    const h = this.cssHeight || cam.height;
     if (cam.orthographic) return cam.orthoHeight / h;
     const v = cam.view64;
     const depth = -(v[2] * x + v[6] * y + v[10] * z + v[14]);
@@ -1507,6 +1548,8 @@ export class Viewer implements ViewerApi {
     const dpr = this.pixelRatio ?? Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 2);
     const cw = c.clientWidth;
     const ch = c.clientHeight;
+    this.cssWidth = cw;
+    this.cssHeight = ch;
     if (cw > 0 && ch > 0) {
       const w = Math.max(1, Math.round(cw * dpr));
       const h = Math.max(1, Math.round(ch * dpr));
@@ -1630,6 +1673,11 @@ export class Viewer implements ViewerApi {
   }
 
   private beforeFrame(dt: number): boolean {
+    if (!this.resizeObserver) {
+      // no observer reports size changes: refresh the cached CSS size once per frame
+      this.cssWidth = this.canvas.clientWidth;
+      this.cssHeight = this.canvas.clientHeight;
+    }
     if (this.loading.size > 0) this.fitLoading();
     let animating = false;
     if (this.controls) animating = this.controls.update(dt) || this.controls.animating;
@@ -1687,8 +1735,8 @@ export class Viewer implements ViewerApi {
   private viewChanged(): void {
     const cam = this.camera;
     const l = this.lastView;
-    const w = this.canvas.clientWidth || cam.width;
-    const h = this.canvas.clientHeight || cam.height;
+    const w = this.cssWidth || cam.width;
+    const h = this.cssHeight || cam.height;
     const e = cam.eye, t = cam.target, u = cam.up;
     if (
       l[0] === e[0] && l[1] === e[1] && l[2] === e[2] &&

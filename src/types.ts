@@ -740,9 +740,18 @@ export interface ViewerApi {
   snap(x: number, y: number, options?: SnapOptions): Promise<SnapResult | null>;
   /**
    * Projects a world point (float64) to canvas CSS pixels with the current camera. Allocation-free
-   * when `out` is given.
+   * when `out` is given. Never reads layout: the canvas CSS size is cached by `resize()` (called by
+   * the viewer's ResizeObserver), so it is cheap to call many times per frame between DOM writes.
    */
   worldToScreen(point: ArrayLike<number>, out?: ScreenPoint): ScreenPoint;
+  /**
+   * Batch `worldToScreen`: projects `points` (flat world x, y, z triples, float64 precision) and
+   * writes 4 values per point: x, y (canvas CSS pixels), depth (as `ScreenPoint.depth`) and flags
+   * (`SCREEN_IN_FRONT` | `SCREEN_IN_VIEW`, i.e. `ScreenPoint.inFront` / `inView`). Writes into `out`
+   * when it holds at least 4 values per point (no allocation), else returns a new array. Same results
+   * as `worldToScreen` (rounded to float32).
+   */
+  worldToScreenMany(points: ArrayLike<number>, out?: Float32Array): Float32Array;
   setSectionPlanes(planes: SectionPlane[]): void;
   /**
    * Image-based lighting: lights the scene with an HDR environment image (diffuse from its

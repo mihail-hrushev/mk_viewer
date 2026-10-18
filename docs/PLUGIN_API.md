@@ -314,7 +314,11 @@ float64 world coordinates. Options: `radius`, `vertices`, `edges`, `edgeAngle`.
   Give elements that should receive input `pointer-events: auto`. Remove your own children in
   `dispose()`; the layer itself goes away with the viewer.
 - `viewer.worldToScreen(point, out?)` projects a float64 world point to canvas CSS pixels with depth,
-  `inFront` and `inView`; pass a reused `out` object to avoid allocation.
+  `inFront` and `inView`; pass a reused `out` object to avoid allocation. It does not read layout
+  (the canvas CSS size is cached by `resize()`), so calls can be interleaved with DOM writes.
+- `viewer.worldToScreenMany(points, out?)` is the batch form: `points` holds flat world x, y, z
+  triples; the result (`out` when it has at least 4 floats per point) holds x, y, depth, flags per
+  point, where flags is `SCREEN_IN_FRONT | SCREEN_IN_VIEW` (exported from `mk-viewer`).
 - Reposition overlay DOM in the `view` event: it fires inside the animation frame whenever the camera
   moves or the canvas is resized, before that frame is shown, and never while idle.
 

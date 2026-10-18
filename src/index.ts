@@ -14,6 +14,7 @@
  *   const model = await viewer.load('plant.glb');
  */
 export { Viewer } from './Viewer';
+export { SCREEN_IN_FRONT, SCREEN_IN_VIEW } from './screenFlags';
 export type {
   Vec3,
   Color,

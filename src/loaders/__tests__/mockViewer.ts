@@ -240,6 +240,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
     pick: async () => null,
     snap: async () => null,
     worldToScreen: () => ({ x: 0, y: 0, depth: 0, inFront: false, inView: false }),
+    worldToScreenMany: (points: ArrayLike<number>, out?: Float32Array) => out ?? new Float32Array(Math.floor(points.length / 3) * 4),
     setTool() {},
     getTool: () => null,
     setSelectionResolver() {},

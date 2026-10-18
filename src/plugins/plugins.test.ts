@@ -7,6 +7,7 @@ import { createHeadlessViewer, type HeadlessViewer } from '../__tests__/headless
 import type { ContextMenuEntry, ToolEndReason, ViewerTool } from '../types';
 import type { ViewerUi } from '../ui/ViewerUi';
 import type { ViewerPlugin } from './types';
+import { SCREEN_IN_FRONT, SCREEN_IN_VIEW } from '../screenFlags';
 import { measurePlugin, type MeasurePlugin, type Measurement } from './measure/measurePlugin';
 import { clipSegment2D, depthCutT, formatDistance, labelOffset } from './measure/geometry';
 import { colorPlugin, DEFAULT_COLORS, type ColorPlugin } from './color/colorPlugin';
@@ -154,6 +155,67 @@ describe('worldToScreen', () => {
     expect(v.worldToScreen([X + 100, 0, Z], out)).toBe(out);
     expect(out.inFront).toBe(true);
     expect(out.inView).toBe(false);
+  });
+
+  it('never reads canvas layout per call; the cached CSS size follows resize()', () => {
+    hv = createHeadlessViewer();
+    const v = hv.viewer;
+    v.camera.setViewport(800, 600);
+    v.setCamera({ eye: [0, 0, 10], target: [0, 0, 0], fov: Math.PI / 2 });
+    let reads = 0;
+    let cw = 800, ch = 600;
+    Object.defineProperty(v.canvas, 'clientWidth', { configurable: true, get: () => (reads++, cw) });
+    Object.defineProperty(v.canvas, 'clientHeight', { configurable: true, get: () => (reads++, ch) });
+    const out = { x: 0, y: 0, depth: 0, inFront: false, inView: false };
+    for (let i = 0; i < 100; i++) v.worldToScreen([i * 0.01, 0, 0], out);
+    v.worldToScreenMany(new Float64Array(300));
+    expect(reads).toBe(0);
+    expect(v.worldToScreen([0, 0, 0]).x).toBeCloseTo(400, 6);
+    // CSS size changes: the observer calls resize(), which refreshes the cache once
+    cw = 400; ch = 300;
+    v.resize();
+    const after = reads;
+    expect(after).toBeGreaterThan(0);
+    const c = v.worldToScreen([0, 0, 0]);
+    expect(c.x).toBeCloseTo(200, 6);
+    expect(c.y).toBeCloseTo(150, 6);
+    expect(reads).toBe(after);
+  });
+
+  it('worldToScreenMany matches worldToScreen (perspective and orthographic, large coordinates)', () => {
+    hv = createHeadlessViewer();
+    const v = hv.viewer;
+    const X = 1e7, Z = -2e7;
+    v.addMesh({ geometry: v.primitives.box([2, 2, 2]), material: v.createMaterial(), transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, X, 0, Z, 1] });
+    v.camera.setViewport(800, 600);
+    const pts: number[] = [];
+    for (let i = 0; i < 50; i++) pts.push(X + (i % 7) * 3 - 9, ((i * 13) % 11) - 5, Z + ((i * 5) % 31) - 15);
+    for (const projection of ['perspective', 'orthographic'] as const) {
+      v.setCamera({ eye: [X, 0, Z + 10], target: [X, 0, Z], fov: Math.PI / 2, orthographic: projection === 'orthographic' });
+      const buf = new Float32Array(pts.length / 3 * 4 + 4);
+      const res = v.worldToScreenMany(pts, buf);
+      expect(res).toBe(buf);
+      const s = { x: 0, y: 0, depth: 0, inFront: false, inView: false };
+      let sawBehind = false, sawOutside = false, sawIn = false;
+      for (let i = 0; i < pts.length / 3; i++) {
+        v.worldToScreen([pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]], s);
+        expect(res[i * 4]).toBe(Math.fround(s.x));
+        expect(res[i * 4 + 1]).toBe(Math.fround(s.y));
+        expect(res[i * 4 + 2]).toBe(Math.fround(s.depth));
+        expect(res[i * 4 + 3]).toBe((s.inFront ? SCREEN_IN_FRONT : 0) | (s.inView ? SCREEN_IN_VIEW : 0));
+        if (!s.inFront) sawBehind = true;
+        else if (!s.inView) sawOutside = true;
+        else sawIn = true;
+      }
+      expect(sawIn).toBe(true);
+      if (projection === 'perspective') expect(sawBehind && sawOutside).toBe(true);
+    }
+    // too small `out`: a new array of the right size
+    const small = new Float32Array(2);
+    const r = v.worldToScreenMany([X, 0, Z, X, 0, Z], small);
+    expect(r).not.toBe(small);
+    expect(r.length).toBe(8);
+    expect(v.worldToScreenMany([]).length).toBe(0);
   });
 });
 
