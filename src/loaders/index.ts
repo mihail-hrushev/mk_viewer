@@ -1,10 +1,11 @@
 /**
- * Model loaders: plugin contract, registry, `loadModel` and the built-in glTF / OBJ plugins.
+ * Model loaders: plugin contract, registry, `loadModel` and the built-in glTF / OBJ / IFC plugins.
  *
  * Registration is explicit (tree-shakeable): call `registerDefaultLoaders()` once, or register only
  * the plugins you need: `defaultRegistry.register(gltfLoader)`.
  */
 import { gltfLoader } from './gltf/GltfLoader';
+import { ifcLoader } from './ifc/IfcLoader';
 import { objLoader } from './obj/ObjLoader';
 import { defaultRegistry, type LoaderRegistry } from './registry';
 
@@ -41,10 +42,13 @@ export type { GltfLoaderOptions, ObjectGrouping, PrimitiveDecoder } from './gltf
 export type { GltfJson, GltfPrimitive } from './gltf/schema';
 export { objLoader } from './obj/ObjLoader';
 export type { ObjLoaderOptions } from './obj/ObjLoader';
+export { createIfcLoader, ifcLoader } from './ifc/IfcLoader';
+export type { IfcLoaderOptions } from './ifc/IfcLoader';
 
-/** Registers the built-in glTF and OBJ plugins into `registry` (default: the shared registry). */
+/** Registers the built-in glTF, OBJ and IFC plugins into `registry` (default: the shared registry). */
 export function registerDefaultLoaders(registry: LoaderRegistry = defaultRegistry): LoaderRegistry {
   registry.register(objLoader);
   registry.register(gltfLoader);
+  registry.register(ifcLoader);
   return registry;
 }

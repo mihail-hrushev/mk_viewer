@@ -24,14 +24,14 @@
  * (selection x-ray on) and ghost=1 (hidden objects shown faintly); all three are switches of the
  * Settings panel.
  */
-import { Viewer, cameraPlugin, colorPlugin, createViewerUi, gltfLoader, measurePlugin, objLoader, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
+import { Viewer, cameraPlugin, colorPlugin, createViewerUi, gltfLoader, ifcLoader, measurePlugin, objLoader, screenshotPlugin, selectionPlugin, setsPlugin, statusPlugin, type MeasurePlugin } from '../src/index';
 import { sectionPlugin } from './section-plugin';
 import { expose, showStats } from './shared';
 
 const params = new URLSearchParams(location.search);
 const viewer = new Viewer(document.getElementById('c') as HTMLCanvasElement, {
   up: params.get('up') === 'y' ? 'y' : 'z',
-  loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
+  loaders: [gltfLoader, objLoader, ifcLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows

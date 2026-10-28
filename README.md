@@ -2,7 +2,7 @@
 
 A fast WebGL2 3D viewer library for very large scenes: millions of meshes, tens of millions of
 triangles, and an API for creating, changing and removing geometry at runtime, every frame if you
-want. Model formats load through plugins (glTF/GLB and OBJ are built in), and several models can be
+want. Model formats load through plugins (glTF/GLB, OBJ and IFC are built in), and several models can be
 loaded side by side (federation). Mouse, touch (pinch, taps) and pen all work.
 
 **What it is:** a TypeScript library with zero runtime dependencies and no proprietary code or
@@ -456,7 +456,7 @@ Loader plugins are registered explicitly, so only the formats you import are bun
 ```ts
 const viewer = new Viewer($<HTMLCanvasElement>('c'), {
   up: params.get('up') === 'y' ? 'y' : 'z',
-  loaders: [gltfLoader, objLoader], // plugins are registered explicitly; only these are bundled
+  loaders: [gltfLoader, objLoader, ifcLoader], // plugins are registered explicitly; only these are bundled
 });
 ```
 
@@ -503,6 +503,35 @@ parents, and per-node properties through `hierarchy.properties(node, inherited)`
 The glTF plugin reads glTF 2.0 / GLB with `EXT_mesh_gpu_instancing` and `KHR_mesh_quantization`.
 Textures are ignored. `createGltfLoader(options)` sets the objectId granularity and plugs in decoders
 for compressed meshes.
+
+The IFC plugin reads `.ifc` files (IFC2X3, IFC4, IFC4X3) with its own STEP reader and geometry
+kernel, so it adds no dependency. It is built for speed over detail:
+
+- One objectId per product (wall, beam, bolt group…); lengths are converted to metres; IFC is Z-up.
+- The tree is project / site / building / storey / elements / parts. Each node's properties hold
+  `Class`, `GlobalId`, `Name`, `ObjectType`, `Tag`, `TypeName`, `Material` and the property and
+  quantity sets, searchable as `Pset_WallCommon.FireRating` and so on.
+- Repeated parts (IfcMappedItem) are triangulated once and drawn instanced.
+- Bolts are drawn as a hexagonal head, shank and nut, all instances of one shared geometry.
+- Circles get as many segments as keep them within 1 mm, at most `circleSegments`.
+- Half-space clips (cut beam ends, mitres) and openings in walls are applied. Other boolean cuts
+  (bolt holes, chamfers, copes) are skipped unless `solidCuts` is on.
+
+```ts
+const viewer = new Viewer(canvas, { up: 'z', loaders: [createIfcLoader({ solidCuts: true, simplifyBolts: false })] });
+```
+
+| option | default | |
+| --- | --- | --- |
+| `circleSegments` | 24 | most segments of a full circle |
+| `simplifyBolts` | true | hexagonal head / shank / nut, one shared geometry |
+| `solidCuts` | false | subtract solids in boolean differences |
+| `openings` | true | cut IfcOpeningElements from their hosts |
+| `spaces` | false | draw IfcSpace volumes |
+| `properties` | true | read property and quantity sets |
+
+A 16 MB Tekla Structures export (13,430 products, 10,758 bolts) loads in 1.2 s to 1.04M triangles
+(desktop Chrome, NVIDIA RTX 2000 Ada).
 
 ### Properties and search
 
@@ -642,7 +671,7 @@ optionally with a `ui(ui)` hook (called when the built-in UI exists) and `dispos
 
 ```ts
 const viewer = new Viewer(canvas, {
-  loaders: [gltfLoader, objLoader], // loader plugins (file formats) are registered explicitly
+  loaders: [gltfLoader, objLoader, ifcLoader], // loader plugins (file formats) are registered explicitly
   // viewer plugins (tools, UI): installed in this order; their toolbar buttons appear with the UI
   // colorPlugin adds "Change colour" (a submenu of named colours) and "Reset colour" to the right-click menu
   // statusPlugin adds the "Status" button: a legend of pasted Tag / Status / State / Colour rows
@@ -1029,6 +1058,13 @@ here was measured on a phone or tablet.
   by roughness, not a GGX-prefiltered map, so blurred reflections are softer and less accurate in
   lobe shape than in an offline renderer. Diffuse light is order-2 SH (smooth, no sharp sun shadows),
   and there are no shadows or occlusion from the environment. Only Radiance `.hdr` files are read.
+- **IFC geometry.** Extrusions, revolutions, swept disks (pipes), faceted and planar B-reps,
+  triangulated and polygonal face sets, mapped items and CSG primitives are drawn. NURBS surfaces
+  (curved faces of advanced B-reps), other sweeps along curves and B-spline curves (drawn as their
+  control polygon) are not: skipped items are listed in `model.warnings`. Fillet radii of standard
+  profiles are ignored. With `solidCuts`, and for openings, a subtracted solid must be an extrusion
+  or convex; others are not cut. Grid placements and IFC4X3 alignment-based placements are not
+  supported. Property values keep the file's units.
 - **Compressed glTF.** Draco and meshopt compressed glTF files need a decoder plugged into
   `createGltfLoader({ primitiveDecoders })`. None is bundled (zero dependencies). Without one, the load
   fails with an error that names the missing extension.
