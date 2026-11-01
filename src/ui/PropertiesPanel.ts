@@ -2,10 +2,12 @@
  * Properties panel: the properties of the selected object, inherited from the nodes above it (as
  * `hierarchy.properties(node, true)` merges them), since exports such as Navisworks or PCF keep the
  * data on the isometric and spool groups. With several objects selected it shows the first.
+ * Nested objects (categories, property sets) are shown as collapsible groups (`propertyRows`).
  * Searching by property is the `SearchPanel`.
  */
 import type { ViewerApi } from '../types';
 import { Panel } from './Panel';
+import { propertyRows } from './propertyRows';
 
 export class PropertiesPanel {
   private readonly viewer: ViewerApi;
@@ -17,6 +19,8 @@ export class PropertiesPanel {
   private selectionDirty = true;
   /** The viewer's selection as of its last `selection` event. */
   private selection: readonly number[];
+  /** Collapsed property groups (categories) by name; kept across selections. */
+  private readonly collapsed = new Set<string>();
 
   constructor(viewer: ViewerApi, parent: HTMLElement, onToggle?: (open: boolean) => void) {
     this.viewer = viewer;
@@ -113,11 +117,21 @@ export class PropertiesPanel {
     add('Model', model ? model.name : '-', 'mkv-props-meta');
     add('Node', (h && node >= 0 ? h.name(node) : undefined) ?? `object ${id}`, 'mkv-props-meta');
     const props = h && node >= 0 ? h.properties(node, true) : undefined;
+    const groupRows = new Map<string, HTMLElement[]>();
     let n = 0;
-    if (props) {
-      for (const key in props) {
-        add(key, formatValue(props[key]));
-        n++;
+    for (const r of propertyRows(props)) {
+      if (r.kind === 'group') {
+        rows.push(this.groupHeader(doc, r.key, groupRows));
+        continue;
+      }
+      add(r.key, r.value);
+      n++;
+      if (r.group !== undefined) {
+        const tr = rows[rows.length - 1];
+        tr.hidden = this.collapsed.has(r.group);
+        let list = groupRows.get(r.group);
+        if (!list) groupRows.set(r.group, (list = []));
+        list.push(tr);
       }
     }
     if (n === 0) {
@@ -131,16 +145,23 @@ export class PropertiesPanel {
     }
     this.selTable.replaceChildren(...rows);
   }
-}
 
-function formatValue(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'object') {
-    try {
-      return JSON.stringify(v);
-    } catch {
-      return String(v);
-    }
+  /** A category header row; a click collapses or expands the rows listed under it in `groupRows`. */
+  private groupHeader(doc: Document, name: string, groupRows: Map<string, HTMLElement[]>): HTMLElement {
+    const tr = doc.createElement('tr');
+    tr.className = 'mkv-props-group';
+    const td = doc.createElement('td');
+    td.colSpan = 2;
+    td.textContent = name;
+    tr.append(td);
+    tr.classList.toggle('mkv-collapsed', this.collapsed.has(name));
+    tr.addEventListener('click', () => {
+      const collapse = !this.collapsed.has(name);
+      if (collapse) this.collapsed.add(name);
+      else this.collapsed.delete(name);
+      tr.classList.toggle('mkv-collapsed', collapse);
+      for (const row of groupRows.get(name) ?? []) row.hidden = collapse;
+    });
+    return tr;
   }
-  return String(v);
 }

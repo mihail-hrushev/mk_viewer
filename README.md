@@ -909,7 +909,10 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - **Properties** opens the properties panel: the selected object's model, node name and the node's
   properties merged with those of every node above it (`hierarchy.properties(node, true)`), since
   exports such as Navisworks or PCF keep the data on the isometric and spool groups; with several
-  objects selected it shows the first.
+  objects selected it shows the first. Nested property objects (glTF `extras` categories, IFC
+  property sets) are shown as a collapsible group header per top-level object with one row per
+  property, deeper levels as dotted keys (`Sub.Prop`, as the search index names them); arrays of
+  values are joined with `, `.
 - **Search** opens the search panel, a search over the property index (`viewer.findObjects`): pick
   a key (the keys of all loaded models, plus `name` for node names) and a mode: **equals**, **list**
   (paste one value per line, e.g. thousands of spool names from a spreadsheet; Ctrl+Enter runs it),

@@ -21,7 +21,7 @@ import type { NodeProperties, PropertyIndex, PropertyKeyInfo, PropertyMatch, Pro
 /** Node names are indexed under this key. */
 export const NAME_KEY = 'name';
 /** Nested property objects are flattened to dotted keys down to this depth. */
-const MAX_DEPTH = 4;
+export const MAX_DEPTH = 4;
 
 interface Column {
   key: string;

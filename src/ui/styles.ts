@@ -101,6 +101,10 @@ textarea.mkv-field{width:100%;resize:vertical;font-family:ui-monospace,Consolas,
 .mkv-props td{padding:3px 6px 3px 0;vertical-align:top;overflow-wrap:anywhere;border-top:1px solid #2d3035}
 .mkv-props td:first-child{width:38%;color:#9aa0a6}
 .mkv-props tr.mkv-props-meta td:last-child{font-weight:600}
+.mkv-props tr.mkv-props-group td{padding-top:8px;color:#e8eaed;font-weight:600;cursor:pointer;user-select:none;-webkit-user-select:none}
+.mkv-props tr.mkv-props-group td::before{content:'▾';display:inline-block;width:14px;color:#9aa0a6}
+.mkv-props tr.mkv-props-group.mkv-collapsed td::before{content:'▸'}
+.mkv-props tr[hidden]{display:none}
 .mkv-missing summary{cursor:pointer;color:#fdd663}
 .mkv-missing pre{margin:4px 0;max-height:160px;overflow:auto;padding:4px 8px;border:1px solid #3c4043;border-radius:6px;background:#202124;
   font:12px/1.4 ui-monospace,Consolas,monospace;user-select:text;-webkit-user-select:text}
