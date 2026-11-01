@@ -2,8 +2,12 @@
  * The uber-shader: one program for all scene geometry (merged and instanced pages, every material,
  * opaque / transparent / ghost passes).
  *
- * Attributes (see GeometryVao): 0 a_position (vec3, unorm16), 1 a_normal (vec2, snorm8 octahedral),
- * 2 a_fragment (uint fragment index).
+ * Attributes (see GeometryVao): 0 a_position (vec3, unorm16), 1 a_normal (ivec2, snorm8 octahedral,
+ * converted here; NORMAL_FLAT_SENTINEL twice = flat shading), 2 a_fragment (uint fragment index).
+ *
+ * Flat shading: a vertex with the sentinel gets v_normal = 0, which stays exactly 0 across the
+ * triangle, and the fragment shader then lights with the face normal from screen-space derivatives
+ * of the view position (no per-face vertices needed, correct under any transform).
  *
  * Uniforms
  *   u_fragTex          sampler2D  fragment record texture (RGBA32F, FRAG_TEX_WIDTH wide)
@@ -77,7 +81,7 @@ ${PRECISION}
 ${LAYOUT_CONSTANTS}
 
 layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec2 a_normal;
+layout(location = 1) in ivec2 a_normal;
 layout(location = 2) in uint a_fragment;
 
 uniform highp sampler2D u_fragTex;
@@ -142,9 +146,14 @@ void main() {
   // Normal: cofactor of the 3x3 (= det * inverse-transpose), correct under non-uniform scale.
   // n * mat3(c0, c1, c2) = (dot(n, c0), dot(n, c1), dot(n, c2)). The sign is fixed in the fragment
   // shader (normals are faced towards the viewer), so mirrored transforms need no det test.
-  vec3 n = octDecode(a_normal);
-  vec3 nWorld = n * mat3(cross(r1.xyz, r2.xyz), cross(r2.xyz, r0.xyz), cross(r0.xyz, r1.xyz));
-  v_normal = mat3(u_viewMatrix) * nWorld;
+  // The snorm conversion is done here (GL ES 3.0: max(c / 127, -1)) so the sentinel stays visible.
+  if (a_normal == ivec2(NORMAL_FLAT_SENTINEL)) {
+    v_normal = vec3(0.0);
+  } else {
+    vec3 n = octDecode(max(vec2(a_normal) / 127.0, -1.0));
+    vec3 nWorld = n * mat3(cross(r1.xyz, r2.xyz), cross(r2.xyz, r0.xyz), cross(r0.xyz, r1.xyz));
+    v_normal = mat3(u_viewMatrix) * nWorld;
+  }
   v_viewPos = view.xyz;
   v_fragment = index;
   v_flags = flags;
@@ -223,15 +232,18 @@ vec3 envRadiance(vec3 d, float lod) {
 #endif
 
 void main() {
-#ifdef EDGES
+  vec3 V = u_orthographic != 0 ? vec3(0.0, 0.0, 1.0) : normalize(-v_viewPos);
+  // Flat-shaded geometry (sentinel normals) has v_normal exactly 0 on the whole triangle.
+  bool flatShaded = dot(v_normal, v_normal) == 0.0;
   // Face normal from the derivatives (taken before any discard: derivatives need the whole quad).
   // Every pixel of a triangle gets the same normal, and so do coplanar neighbours: their shared
-  // diagonal leaves no trace. Faced towards the viewer like the shading normal.
+  // diagonal leaves no trace. Faced towards the viewer like the shading normal. Used for flat
+  // shading and, in the EDGES variant, for the face normal attachment.
   vec3 fn = cross(dFdx(v_viewPos), dFdy(v_viewPos));
   float fl = dot(fn, fn);
-  fn = fl > 1e-30 ? fn * inversesqrt(fl) : normalize(v_normal);
-  vec3 fv = u_orthographic != 0 ? vec3(0.0, 0.0, 1.0) : -v_viewPos;
-  if (dot(fn, fv) < 0.0) fn = -fn;
+  fn = fl > 1e-30 ? fn * inversesqrt(fl) : (flatShaded ? V : normalize(v_normal));
+  if (dot(fn, V) < 0.0) fn = -fn;
+#ifdef EDGES
   o_normal = vec4(octEncode(fn) * 0.5 + 0.5, 0.0, 0.0);
 #endif
 #ifdef SECTION_PLANES
@@ -242,8 +254,7 @@ void main() {
   }
 #endif
 
-  vec3 V = u_orthographic != 0 ? vec3(0.0, 0.0, 1.0) : normalize(-v_viewPos);
-  vec3 N = normalize(v_normal);
+  vec3 N = flatShaded ? fn : normalize(v_normal);
   // Two-sided lighting: face the normal towards the viewer (handles mirrored transforms,
   // inconsistent winding and the inside of section cuts).
   if (dot(N, V) < 0.0) N = -N;

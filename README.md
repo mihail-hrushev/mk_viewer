@@ -138,8 +138,11 @@ own geometry is a triangle list (from [stress.ts](examples/stress.ts)):
 const geometry = viewer.createGeometry(boxGeometry(1 + rnd() * 4, 2 + rnd() * 20, 1 + rnd() * 4));
 ```
 
-`GeometryData` is `{ positions, indices?, normals? }`. Without `indices` the positions are separate
-triangles, and missing normals are computed (flat without indices, smooth with them). The data is
+`GeometryData` is `{ positions, indices?, normals?, flatShading? }`. Without `indices` the positions
+are separate triangles, and missing normals are computed (flat without indices, smooth with them).
+`flatShading: true` shades every triangle with its own face normal even where indexed triangles share
+corners (welded vertices), at no memory cost (the face normal is found on the GPU); the glTF loader
+sets it for primitives without a `NORMAL` attribute, as glTF 2.0 requires. The data is
 copied and compressed at once, so you may reuse or drop your arrays. `releaseGeometry(id)` frees it
 once no mesh uses it. The raw generators (`box`, `sphere`, ... `extrusion`, `triangulate`) are also
 exported if you want the arrays themselves.

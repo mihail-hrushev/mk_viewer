@@ -10,7 +10,8 @@
 /**
  * Shared-geometry vertex, used for instanced drawing. 8 bytes:
  *   0  u16 x3  position, quantized to 0..65535 inside the geometry's local AABB (normalized attribute)
- *   6  i8  x2  octahedron-encoded unit normal (snorm attribute)
+ *   6  i8  x2  octahedron-encoded unit normal (integer attribute, decoded as snorm in the shader),
+ *              or NORMAL_FLAT_SENTINEL twice for flat shading
  * The fragment index comes from a per-instance u32 attribute.
  */
 export const SHARED_VERTEX_STRIDE = 8;
@@ -28,6 +29,13 @@ export const MERGED_VERTEX_STRIDE = 12;
 export const VERTEX_POSITION_OFFSET = 0;
 export const VERTEX_NORMAL_OFFSET = 6;
 export const VERTEX_FRAGMENT_OFFSET = 8;
+
+/**
+ * Both normal bytes set to this value (never produced by the octahedral encoder, which stays in
+ * -127..127) mark a vertex without a normal: the fragment shader shades it flat with the face
+ * normal from screen-space derivatives (`GeometryData.flatShading`).
+ */
+export const NORMAL_FLAT_SENTINEL = -128;
 
 /** Index buffers are always u32. */
 export const INDEX_BYTES = 4;

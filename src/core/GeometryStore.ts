@@ -13,7 +13,11 @@
  * AABB [offset, offset + scale].
  */
 import type { GeometryData } from '../types';
+import { NORMAL_FLAT_SENTINEL } from '../layout';
 import { grow } from './util';
+
+/** The normal bytes of the second vertex word, both NORMAL_FLAT_SENTINEL (flat shading). */
+const FLAT_NORMAL_BITS = (((NORMAL_FLAT_SENTINEL & 255) << 16) | ((NORMAL_FLAT_SENTINEL & 255) << 24)) >>> 0;
 
 const f32 = new Float32Array(1);
 const f32u = new Uint32Array(f32.buffer);
@@ -152,7 +156,8 @@ export class GeometryStore {
     const idx = data.indices;
     const ic = idx ? idx.length : vc;
     if (ic % 3 !== 0) throw new Error('triangle list length must be a multiple of 3');
-    if (data.normals && data.normals.length !== pos.length) {
+    const flat = data.flatShading === true;
+    if (!flat && data.normals && data.normals.length !== pos.length) {
       throw new Error('GeometryData.normals must have the same length as positions');
     }
 
@@ -180,8 +185,10 @@ export class GeometryStore {
     const iz = sz > 0 ? 65535 / sz : 0;
 
     // --- normals
-    let nrm: ArrayLike<number>;
-    if (data.normals) {
+    let nrm: ArrayLike<number> | null = null;
+    if (flat) {
+      // no normals: the sentinel bytes tell the shader to shade with the face normal
+    } else if (data.normals) {
       nrm = data.normals;
     } else {
       this.normals = grow(this.normals, vc * 3);
@@ -201,9 +208,13 @@ export class GeometryStore {
       const qx = q16((pos[p] - ox) * ix);
       const qy = q16((pos[p + 1] - oy) * iy);
       const qz = q16((pos[p + 2] - oz) * iz);
-      octEncode(+nrm[p], +nrm[p + 1], +nrm[p + 2], oct, 0);
       w[v * 2] = (qx | (qy << 16)) >>> 0;
-      w[v * 2 + 1] = (qz | ((oct[0] & 255) << 16) | ((oct[1] & 255) << 24)) >>> 0;
+      if (nrm) {
+        octEncode(+nrm[p], +nrm[p + 1], +nrm[p + 2], oct, 0);
+        w[v * 2 + 1] = (qz | ((oct[0] & 255) << 16) | ((oct[1] & 255) << 24)) >>> 0;
+      } else {
+        w[v * 2 + 1] = (qz | FLAT_NORMAL_BITS) >>> 0;
+      }
     }
     const ib = vc * 2;
     if (idx) {
@@ -346,9 +357,13 @@ export class GeometryStore {
     out[2] = ((w1 & 0xffff) / 65535) * dq[d + 2] + dq[d + 5];
   }
 
-  /** Decoded unit normal of vertex v of geometry id. */
+  /** Decoded unit normal of vertex v of geometry id; (0, 0, 0) for flat-shaded geometry. */
   decodeNormal(id: number, v: number, out: Float32Array | number[]): void {
     const w1 = this.chunk(id)[this.wordOffset[id] + v * 2 + 1];
+    if (((w1 & 0xffff0000) >>> 0) === FLAT_NORMAL_BITS) {
+      out[0] = out[1] = out[2] = 0;
+      return;
+    }
     octDecode(((w1 << 8) >> 24), (w1 >> 24), out);
   }
 

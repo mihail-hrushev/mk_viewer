@@ -571,7 +571,8 @@ async function buildGeometry(
     for (let i = 0; i < idx.length; i++) if (idx[i] >= vc) throw new Error(`index ${idx[i]} out of range (${vc} vertices)`);
     if (idx.length === 0) return null;
   } else if (positions.length < 9) return null;
-  return { positions, normals, indices: idx };
+  // glTF 2.0: without normals, clients must use flat normals (not smooth ones over shared vertices).
+  return normals ? { positions, normals, indices: idx } : { positions, indices: idx, flatShading: true };
 }
 
 function sub(a: ArrayLike<number>, n: number): ArrayLike<number> {

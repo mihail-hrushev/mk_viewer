@@ -3,7 +3,7 @@
  * single uber-shader program draws both paths:
  *
  *   location 0  a_position  vec3  <- u16 x3 normalized   (byte offset VERTEX_POSITION_OFFSET)
- *   location 1  a_normal    vec2  <- i8 x2 normalized     (byte offset VERTEX_NORMAL_OFFSET)
+ *   location 1  a_normal    ivec2 <- i8 x2 integer        (byte offset VERTEX_NORMAL_OFFSET)
  *   location 2  a_fragment  uint  <- u32 integer attribute:
  *                 merged page:    per vertex, byte offset VERTEX_FRAGMENT_OFFSET, stride MERGED_VERTEX_STRIDE
  *                 instanced page: per instance (divisor 1) from a separate u32 instance buffer
@@ -114,7 +114,9 @@ export class GeometryVao implements GlResource {
     gl.enableVertexAttribArray(ATTRIB_POSITION);
     gl.vertexAttribPointer(ATTRIB_POSITION, 3, gl.UNSIGNED_SHORT, true, stride, VERTEX_POSITION_OFFSET);
     gl.enableVertexAttribArray(ATTRIB_NORMAL);
-    gl.vertexAttribPointer(ATTRIB_NORMAL, 2, gl.BYTE, true, stride, VERTEX_NORMAL_OFFSET);
+    // Integer attribute: the shader does the snorm conversion itself, so it can tell the flat
+    // sentinel (-128) from -127.
+    gl.vertexAttribIPointer(ATTRIB_NORMAL, 2, gl.BYTE, stride, VERTEX_NORMAL_OFFSET);
 
     gl.enableVertexAttribArray(ATTRIB_FRAGMENT);
     if (this.instanceBuffer) {

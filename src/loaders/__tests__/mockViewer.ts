@@ -19,6 +19,8 @@ export interface MockGeometry {
   triangles: number;
   indexed: boolean;
   hasNormals: boolean;
+  /** GeometryData.flatShading was set. */
+  flatShading: boolean;
   released: boolean;
   /** Copies (only with keepData). */
   positions?: Float64Array;
@@ -107,6 +109,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
         triangles: data.indices ? data.indices.length / 3 : vc / 3,
         indexed: !!data.indices,
         hasNormals: !!data.normals,
+        flatShading: data.flatShading === true,
         released: false,
         positionsWasView: ArrayBuffer.isView(p) && (p as Float32Array).byteLength < (p as Float32Array).buffer.byteLength,
         box,

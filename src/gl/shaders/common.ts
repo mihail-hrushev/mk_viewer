@@ -9,6 +9,7 @@ import {
   MAT_RECORDS_PER_ROW,
   MAT_TEXELS,
   MAX_SECTION_PLANES,
+  NORMAL_FLAT_SENTINEL,
 } from '../../layout';
 
 export type ShaderDefines = Record<string, number | string | boolean | undefined>;
@@ -62,6 +63,7 @@ const uint FLAG_HIGHLIGHTED = ${FragFlags.Highlighted}u;
 const uint FLAG_NOT_PICKABLE = ${FragFlags.NotPickable}u;
 const uint FLAG_HIDDEN = ${FragFlags.Hidden}u;
 const int MAX_SECTION_PLANES = ${MAX_SECTION_PLANES};
+const int NORMAL_FLAT_SENTINEL = ${NORMAL_FLAT_SENTINEL};
 `;
 
 /** Texel coordinate helpers (fragment record texel 0 / material record texel 0). */

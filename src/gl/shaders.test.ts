@@ -82,7 +82,7 @@ describe('shader sources (static GLSL ES 3.00 checks)', () => {
   it('uber VS uses fixed attribute locations 0/1/2', () => {
     const vs = ALL.uberVS;
     expect(vs).toContain('layout(location = 0) in vec3 a_position;');
-    expect(vs).toContain('layout(location = 1) in vec2 a_normal;');
+    expect(vs).toContain('layout(location = 1) in ivec2 a_normal;');
     expect(vs).toContain('layout(location = 2) in uint a_fragment;');
   });
 

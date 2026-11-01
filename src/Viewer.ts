@@ -394,7 +394,7 @@ export class Viewer implements ViewerApi {
     positionsBounds(data.positions, box, 0, c);
     let d = data;
     if (needsRecentre(c)) {
-      d = { positions: shiftPositions(data.positions, c), indices: data.indices, normals: data.normals };
+      d = { positions: shiftPositions(data.positions, c), indices: data.indices, normals: data.normals, flatShading: data.flatShading };
     }
     const core = this.scene.createGeometry(d);
     let id: number;

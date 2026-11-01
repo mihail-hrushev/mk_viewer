@@ -198,6 +198,13 @@ export interface GeometryData {
   indices?: ArrayLike<number>;
   /** xyz triples. If omitted, normals are computed (flat for non-indexed, smooth for indexed). */
   normals?: ArrayLike<number>;
+  /**
+   * Shade every triangle flat with its own face normal, also where indexed triangles share
+   * vertices; `normals` is then ignored. The face normal is found on the GPU, so this costs no
+   * memory. The glTF loader sets it for primitives without a NORMAL attribute (glTF 2.0: flat
+   * normals). Default false.
+   */
+  flatShading?: boolean;
 }
 
 export interface MaterialParams {

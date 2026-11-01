@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GeometryStore, octDecode, octEncode } from './GeometryStore';
+import { NORMAL_FLAT_SENTINEL } from '../layout';
 import { boxGeometry, randomMesh, rng } from './testkit';
 
 describe('GeometryStore quantization', () => {
@@ -118,6 +119,27 @@ describe('octahedral normals', () => {
     expect(n[2]).toBeCloseTo(Math.SQRT1_2, 1);
     gs.decodeNormal(smooth, 1, n);
     expect(n[2]).toBeGreaterThan(0.999);
+  });
+
+  it('flatShading writes the flat sentinel (no normals) and is not merged with the smooth twin', () => {
+    const gs = new GeometryStore();
+    const data = { positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1], indices: [0, 1, 2, 0, 2, 3] };
+    const flat = gs.add({ ...data, flatShading: true, normals: [1, 2] }); // normals ignored
+    const smooth = gs.add(data);
+    expect(flat).not.toBe(smooth);
+    expect(gs.add({ ...data, flatShading: true })).toBe(flat);
+    const n = [9, 9, 9];
+    for (let v = 0; v < 4; v++) {
+      gs.decodeNormal(flat, v, n);
+      expect(n).toEqual([0, 0, 0]);
+    }
+    const p = [0, 0, 0];
+    gs.decodeNormal(smooth, 1, p);
+    expect(p[2]).toBeGreaterThan(0.999);
+    // the raw bytes are the sentinel the shader tests for
+    const w1 = gs.chunk(flat)[gs.vertexWord(flat) + 1];
+    expect((w1 << 8) >> 24).toBe(NORMAL_FLAT_SENTINEL);
+    expect(w1 >> 24).toBe(NORMAL_FLAT_SENTINEL);
   });
 });
 

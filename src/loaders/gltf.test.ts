@@ -78,6 +78,7 @@ describe('glTF loader: geometry', () => {
     const g = v.geometries[0];
     expect(g.indexed).toBe(false);
     expect(g.hasNormals).toBe(true);
+    expect(g.flatShading).toBe(false);
     expect(g.positionsWasView).toBe(true);
     close(g.positions!, TRI);
     expect(m.stats).toMatchObject({ meshes: 1, triangles: 1, geometries: 1 });
@@ -98,6 +99,9 @@ describe('glTF loader: geometry', () => {
     const m = await load(v, b.glb());
     expect(Array.from(v.geometries[0].indices!)).toEqual([0, 1, 2, 2, 1, 3]);
     expect(m.stats.triangles).toBe(2);
+    // glTF 2.0: no NORMAL -> flat normals, also over shared (welded) vertices
+    expect(v.geometries[0].hasNormals).toBe(false);
+    expect(v.geometries[0].flatShading).toBe(true);
   });
 
   it('interleaved (byteStride) and misaligned accessors are copied correctly', async () => {

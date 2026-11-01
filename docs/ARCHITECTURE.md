@@ -53,7 +53,13 @@ buffers are never touched. The scene also keeps a `Set` of the objectIds that ha
 `clearColors()` need no scan of the fragment list.
 
 **Geometry** is quantized on creation: positions to u16 inside the mesh's local AABB, normals to
-2-byte octahedral. Identical geometry is deduplicated by content hash. The dequantization
+2-byte octahedral. Flat-shaded geometry (`GeometryData.flatShading`, glTF primitives without
+`NORMAL`) stores the sentinel -128 in both normal bytes instead: the normal attribute is an integer
+attribute (the shader does the snorm conversion), the vertex shader passes a zero normal for the
+sentinel, and the fragment shader lights such pixels with the face normal from screen-space
+derivatives of the view position (the one the edge display uses), faced towards the viewer. So welded
+flat meshes stay indexed and need no per-face vertices. Identical geometry is deduplicated by content
+hash. The dequantization
 scale/offset is copied into each fragment record.
 
 **Materials** live in a data texture; one uber-shader handles all of them, so there are no
