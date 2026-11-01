@@ -15,8 +15,8 @@
  * merge-walked), gather the postings, and expand the matched positions to object ranges, skipping
  * positions already covered by a matched ancestor, so the result has no duplicates.
  */
-import type { HierarchyStore } from '../loaders/hierarchy';
-import type { NodeProperties, PropertyIndex, PropertyKeyInfo, PropertyMatch, PropertyQuery } from '../loaders/types';
+import type { HierarchyStore, TableBatch } from '../loaders/hierarchy';
+import type { NodeProperties, NodePropertyTable, PropertyIndex, PropertyKeyInfo, PropertyMatch, PropertyQuery } from '../loaders/types';
 
 /** Node names are indexed under this key. */
 export const NAME_KEY = 'name';
@@ -383,11 +383,16 @@ export class PropertyIndexImpl implements PropertyIndex {
 
   private buildColumns(h: HierarchyStore, n: number): void {
     const builds = new Map<string, ColumnBuild>();
-    const add = (key: string, raw: unknown, p: number): void => {
-      const text = String(raw).trim();
-      if (text === '') return;
+    const column = (key: string): ColumnBuild => {
       let b = builds.get(key);
       if (!b) builds.set(key, (b = { key, dict: new Map(), values: [], occVal: [], occPos: [] }));
+      return b;
+    };
+    const add = (key: string, raw: unknown, p: number): void => {
+      const text = String(raw).trim();
+      if (text !== '') addText(column(key), text, p);
+    };
+    const addText = (b: ColumnBuild, text: string, p: number): void => {
       let vid = b.dict.get(text);
       if (vid === undefined) {
         vid = b.values.length;
@@ -399,13 +404,40 @@ export class PropertyIndexImpl implements PropertyIndex {
       b.occVal.push(vid);
       b.occPos.push(p);
     };
+    // property tables are read row by row: per table, the column of each key and the text of each
+    // value are resolved once, so no per-node object is decoded
+    const tables = new Map<NodePropertyTable, { cols: (ColumnBuild | undefined)[]; texts: (string | undefined)[] }>();
+    const addRows = (t: TableBatch, k: number, p: number): void => {
+      const tab = t.table;
+      let st = tables.get(tab);
+      if (!st) tables.set(tab, (st = { cols: new Array(tab.keys.length), texts: new Array(tab.values.length) }));
+      const { cols, texts } = st;
+      const { key, value } = tab;
+      for (let r = tab.rowStart[k], e = tab.rowStart[k + 1]; r < e; r++) {
+        const v = value[r];
+        let text = texts[v];
+        if (text === undefined) texts[v] = text = String(tab.values[v]).trim();
+        if (text === '') continue;
+        const ki = key[r];
+        let b = cols[ki];
+        if (b === undefined) {
+          const [group, name] = tab.keys[ki];
+          b = cols[ki] = column(group + '.' + name);
+        }
+        addText(b, text, p);
+      }
+    };
     const order = this.order;
     for (let p = 0; p < n; p++) {
       const node = order[p];
       const name = h.name(node);
       if (name !== undefined) add(NAME_KEY, name, p);
-      const props = h.ownProperties(node);
-      if (props) flatten(props, '', 0, p, add);
+      const t = h.tableOf(node);
+      if (t) addRows(t, node - t.first, p);
+      else {
+        const props = h.ownProperties(node);
+        if (props) flatten(props, '', 0, p, add);
+      }
     }
     for (const b of builds.values()) this.columns.set(b.key, finishColumn(b, n));
   }

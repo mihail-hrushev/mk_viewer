@@ -24,6 +24,7 @@ export type {
   ModelInfoExtras,
   ModelStats,
   NodeProperties,
+  NodePropertyTable,
   PropertyIndex,
   PropertyKeyInfo,
   PropertyMatch,

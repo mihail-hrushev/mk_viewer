@@ -3,12 +3,19 @@
  * properties that are either stored sparsely or produced lazily by per-batch callbacks. Children
  * (CSR) and the objectId -> node index are built on first query. No per-node objects.
  */
-import type { HierarchyBuilder, ModelHierarchy, NodeProperties } from './types';
+import type { HierarchyBuilder, ModelHierarchy, NodeProperties, NodePropertyTable } from './types';
 
 interface Batch<T> {
   start: number;
   count: number;
   fn: (i: number) => T | undefined;
+}
+
+/** A property table over the nodes first .. first + count - 1 (see `addPropertyTable`). */
+export interface TableBatch {
+  first: number;
+  count: number;
+  table: NodePropertyTable;
 }
 
 const EMPTY = new Int32Array(0);
@@ -21,6 +28,7 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
   private batches: Batch<string>[] = [];
   private props = new Map<number, NodeProperties>();
   private propBatches: Batch<NodeProperties>[] = [];
+  private tables: TableBatch[] = [];
   // lazy indices
   private childStart: Int32Array | null = null;
   private childList: Int32Array | null = null;
@@ -87,6 +95,43 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     return start;
   }
 
+  addPropertyTable(first: number, table: NodePropertyTable): void {
+    const { rowStart, key, value, keys, values } = table;
+    const count = rowStart.length - 1;
+    if (!(count >= 0 && first >= 0 && first + count <= this.n)) {
+      throw new RangeError(`hierarchy: property table covers nodes ${first}..${first + count - 1}, ${this.n} exist`);
+    }
+    const rows = count >= 0 ? rowStart[count] : 0;
+    if (!(rowStart[0] >= 0) || !(rows <= key.length && rows <= value.length)) {
+      throw new RangeError(`hierarchy: property table has ${rows} rows but ${key.length} keys / ${value.length} values`);
+    }
+    for (let i = 0; i < count; i++) {
+      if (!(rowStart[i + 1] >= rowStart[i])) throw new RangeError(`hierarchy: property table rowStart decreases at ${i + 1}`);
+    }
+    const K = keys.length, V = values.length;
+    for (let r = rowStart[0]; r < rows; r++) {
+      if (!(key[r] < K) || !(value[r] < V)) throw new RangeError(`hierarchy: property table row ${r} is out of range`);
+    }
+    this.tables.push({ first, count, table });
+  }
+
+  /**
+   * The property table holding the node's own properties, or undefined when its properties come
+   * from elsewhere (explicit, a callback batch, or none): internal, for the index.
+   */
+  tableOf(node: number): TableBatch | undefined {
+    if (this.tables.length === 0 || this.props.has(node)) return undefined;
+    for (let i = this.tables.length - 1; i >= 0; i--) {
+      const t = this.tables[i];
+      const k = node - t.first;
+      if (k >= 0 && k < t.count) {
+        const rs = t.table.rowStart;
+        return rs[k + 1] > rs[k] ? t : undefined;
+      }
+    }
+    return undefined;
+  }
+
   // --- ModelHierarchy ---
 
   parent(node: number): number {
@@ -109,6 +154,8 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     if (!(node >= 0 && node < this.n)) return undefined;
     const p = this.props.get(node);
     if (p !== undefined) return p;
+    const t = this.tableOf(node);
+    if (t) return decodeRows(t.table, node - t.first);
     return lookupBatch(this.propBatches, node);
   }
 
@@ -163,6 +210,7 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     this.names.clear();
     this.propBatches = [];
     this.props.clear();
+    this.tables = [];
   }
 
   private buildChildren(): void {
@@ -219,6 +267,31 @@ export class HierarchyStore implements HierarchyBuilder, ModelHierarchy {
     }
     return this.oidIndex;
   }
+}
+
+/** The rows of the table's node `k` as `{ [group]: { [name]: value } }`. */
+export function decodeRows(t: NodePropertyTable, k: number): NodeProperties {
+  const out: NodeProperties = {};
+  const { keys, values, key, value } = t;
+  let last = '', g: Record<string, unknown> | undefined;
+  for (let r = t.rowStart[k], e = t.rowStart[k + 1]; r < e; r++) {
+    const [group, name] = keys[key[r]];
+    if (g === undefined || group !== last) {
+      last = group;
+      g = hasOwn(out, group) ? (out[group] as Record<string, unknown>) : setOwn(out, group, {});
+    }
+    setOwn(g, name, values[value[r]]);
+  }
+  return out;
+}
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+
+/** `o[k] = v` as an own data property, also for `__proto__` (as JSON.parse would). */
+function setOwn<T>(o: Record<string, unknown>, k: string, v: T): T {
+  if (k === '__proto__') Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+  else o[k] = v;
+  return v;
 }
 
 function lookupBatch<T>(batches: Batch<T>[], node: number): T | undefined {

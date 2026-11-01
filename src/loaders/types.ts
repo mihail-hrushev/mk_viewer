@@ -133,6 +133,32 @@ export interface HierarchyBuilder {
     name?: (i: number) => string | undefined,
     properties?: (i: number) => NodeProperties | undefined,
   ): number;
+  /**
+   * Columnar properties for the nodes `first .. first + rowStart.length - 2` (already added): the
+   * rows of node `first + i` are `rowStart[i] .. rowStart[i + 1] - 1`, each a (key, value) pair of
+   * indices into `keys` and `values`. A node with rows has the properties
+   * `{ [group]: { [name]: value } }`, decoded only when asked for, and the property index reads the
+   * rows directly; a node with no rows keeps whatever `addNode` / `addNodes` gave it. Throws a
+   * RangeError when the table is inconsistent (nothing is stored then).
+   */
+  addPropertyTable(first: number, table: NodePropertyTable): void;
+}
+
+/**
+ * Properties of a run of nodes as rows instead of objects (see `HierarchyBuilder.addPropertyTable`).
+ * Keys and values are stored once each; a row is two integers. Typed arrays are kept as given.
+ */
+export interface NodePropertyTable {
+  /** Distinct `[group, name]` pairs (e.g. `[category, property]`); a row's key indexes this. */
+  readonly keys: ReadonlyArray<readonly [string, string]>;
+  /** Distinct values; a row's value indexes this. */
+  readonly values: ReadonlyArray<string | number | boolean>;
+  /** One more than the number of nodes covered; non-decreasing. */
+  readonly rowStart: ArrayLike<number>;
+  /** Per row: index into `keys`. */
+  readonly key: ArrayLike<number>;
+  /** Per row: index into `values`. */
+  readonly value: ArrayLike<number>;
 }
 
 /** Lazily computes properties for an objectId of this model (undefined = none). */

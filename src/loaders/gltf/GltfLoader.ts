@@ -10,12 +10,15 @@
  *     (cached by accessor tuple, built from zero-copy views where possible) and adds all its placements
  *     with one `addMeshes` call — so a primitive reused by many nodes becomes viewer instancing.
  *  4. Hierarchy (parents, objectIds) is stored columnar; names/properties are read lazily from the
- *     parsed `nodes` array, which is the only part of the JSON kept after loading.
+ *     parsed `nodes` array, which is the only part of the JSON kept after loading. Node properties
+ *     come from the `MK_property_table` root extension when present (typed-array rows, decoded per
+ *     node on demand, see docs/MK_property_table.md), else from node `extras`.
  */
 import type { GeometryData, MaterialId } from '../../types';
 import { fromTRS, multiply } from '../mat4d';
 import { decodeDataUri } from '../source';
-import type { LoadContext, LoaderPlugin, LoaderSource } from '../types';
+import { decodeRows } from '../hierarchy';
+import type { LoadContext, LoaderPlugin, LoaderSource, NodePropertyTable } from '../types';
 import { AccessorReader } from './accessors';
 import { isGlb, looksLikeGltfJson, parseGlb, parseJsonBytes } from './container';
 import { gltfMaterialParams } from './materials';
@@ -52,6 +55,9 @@ export interface GltfLoaderOptions {
   primitiveDecoders: Record<string, PrimitiveDecoder>;
 }
 
+/** Root extension holding all node properties as a table (MK Navisworks exports). */
+const PROPERTY_TABLE = 'MK_property_table';
+
 /** Extensions handled (or harmlessly ignored, e.g. texture-only ones since textures are ignored). */
 const BUILTIN_EXTENSIONS = new Set([
   'KHR_mesh_quantization',
@@ -62,6 +68,7 @@ const BUILTIN_EXTENSIONS = new Set([
   'KHR_texture_basisu',
   'EXT_texture_webp',
   'EXT_texture_avif',
+  PROPERTY_TABLE,
 ]);
 
 const EXTENSION_HINTS: Record<string, string> = {
@@ -313,12 +320,25 @@ async function loadGltf(source: LoaderSource, ctx: LoadContext<GltfLoaderOptions
     for (let k = 0; k < ownerCount; k++) oidCol[owners[k]] = oidBase + k;
     if (offset) for (let i = 0; i < N; i++) if (parent[i] >= 0) parent[i] += offset;
     const keep = opt.keepNames !== false;
-    ctx.hierarchy.addNodes(
+    const first = ctx.hierarchy.addNodes(
       parent,
       oidCol,
       keep ? (i) => nodes[i].name : undefined,
       keep ? (i) => nodeProperties(nodes[i].extras) : undefined,
     );
+    // the table wins for nodes with rows; nodes without rows keep their extras (if any)
+    let table: NodePropertyTable | undefined;
+    if (keep) {
+      table = readPropertyTable(json, reader, N, ctx);
+      if (table) {
+        try {
+          ctx.hierarchy.addPropertyTable(first, table);
+        } catch (e) {
+          ctx.warn(`${PROPERTY_TABLE} ignored: ${e instanceof Error ? e.message : String(e)}`);
+          table = undefined;
+        }
+      }
+    }
     if (keep) {
       // lazy properties straight from the parsed nodes (the only JSON part retained)
       const ownerTable = owners.slice(0, ownerCount);
@@ -330,7 +350,9 @@ async function loadGltf(source: LoaderSource, ctx: LoadContext<GltfLoaderOptions
         const nd = nodes[ni];
         const props: Record<string, unknown> = { gltfNode: ni };
         if (nd.mesh !== undefined && meshNames[nd.mesh] !== undefined) props.meshName = meshNames[nd.mesh];
-        if (nd.extras !== undefined) props.extras = nd.extras;
+        const rows = table && table.rowStart[ni + 1] > table.rowStart[ni];
+        if (rows) props.extras = decodeRows(table!, ni);
+        else if (nd.extras !== undefined) props.extras = nd.extras;
         return props;
       });
     }
@@ -581,6 +603,46 @@ export function toTriangleList(idx: ArrayLike<number> | undefined, vertexCount: 
     out[o++] = c;
   }
   return o === out.length ? out : out.slice(0, o);
+}
+
+let warnedTableVersion = false;
+
+/**
+ * The `MK_property_table` root extension as a node property table over all `N` nodes, or undefined
+ * when absent or unusable (with a warning; properties then come from node extras). Accessors are
+ * read as zero-copy views where aligned.
+ */
+function readPropertyTable(json: GltfJson, reader: AccessorReader, N: number, ctx: LoadContext<GltfLoaderOptions>): NodePropertyTable | undefined {
+  const ext = json.extensions?.[PROPERTY_TABLE];
+  if (ext === undefined) return undefined;
+  if (ext === null || typeof ext !== 'object' || ext.version !== 1) {
+    const msg = `${PROPERTY_TABLE} version ${ext?.version} is not supported (1 is); node extras used instead`;
+    if (!warnedTableVersion) {
+      warnedTableVersion = true;
+      console.warn(msg);
+    }
+    ctx.warn(msg);
+    return undefined;
+  }
+  try {
+    const { keys, values } = ext;
+    if (!Array.isArray(keys) || !keys.every((k: unknown) => Array.isArray(k) && k.length === 2 && typeof k[0] === 'string' && typeof k[1] === 'string')) {
+      throw new Error('keys must be [category, property] string pairs');
+    }
+    if (!Array.isArray(values)) throw new Error('values must be an array');
+    const scalar = (name: string): Uint8Array | Uint16Array | Uint32Array => {
+      const i = ext[name];
+      if (!Number.isInteger(i)) throw new Error(`${name} must be an accessor index`);
+      return reader.readIndices(i);
+    };
+    const rowStart = scalar('nodeStart'), key = scalar('key'), value = scalar('value');
+    if (rowStart.length !== N + 1) throw new Error(`nodeStart has ${rowStart.length} entries, ${N + 1} expected`);
+    if (key.length !== value.length) throw new Error(`key has ${key.length} rows, value ${value.length}`);
+    return { keys, values, rowStart, key, value };
+  } catch (e) {
+    ctx.warn(`${PROPERTY_TABLE} ignored: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
 }
 
 /** glTF `extras` of a node as its properties: only a plain JSON object counts. */

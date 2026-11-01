@@ -12,6 +12,7 @@ export interface GltfJson {
   materials?: GltfMaterial[];
   extensionsUsed?: string[];
   extensionsRequired?: string[];
+  extensions?: Record<string, any>;
   extras?: unknown;
 }
 
