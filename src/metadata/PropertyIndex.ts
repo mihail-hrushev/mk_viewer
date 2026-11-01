@@ -45,8 +45,10 @@ interface ColumnBuild {
   key: string;
   dict: Map<string, number>;
   values: string[];
-  occVal: number[];
-  occPos: number[];
+  /** Occurrences (value id, position) in [0, occ). */
+  occVal: Int32Array;
+  occPos: Int32Array;
+  occ: number;
 }
 
 const EMPTY_F64 = new Float64Array(0);
@@ -385,7 +387,7 @@ export class PropertyIndexImpl implements PropertyIndex {
     const builds = new Map<string, ColumnBuild>();
     const column = (key: string): ColumnBuild => {
       let b = builds.get(key);
-      if (!b) builds.set(key, (b = { key, dict: new Map(), values: [], occVal: [], occPos: [] }));
+      if (!b) builds.set(key, (b = { key, dict: new Map(), values: [], occVal: new Int32Array(64), occPos: new Int32Array(64), occ: 0 }));
       return b;
     };
     const add = (key: string, raw: unknown, p: number): void => {
@@ -399,10 +401,17 @@ export class PropertyIndexImpl implements PropertyIndex {
         b.dict.set(text, vid);
         b.values.push(text);
       }
-      const last = b.occPos.length - 1;
+      const last = b.occ - 1;
       if (last >= 0 && b.occPos[last] === p && b.occVal[last] === vid) return; // same pair twice
-      b.occVal.push(vid);
-      b.occPos.push(p);
+      if (b.occ === b.occVal.length) {
+        const v2 = new Int32Array(b.occ * 2), p2 = new Int32Array(b.occ * 2);
+        v2.set(b.occVal);
+        p2.set(b.occPos);
+        b.occVal = v2;
+        b.occPos = p2;
+      }
+      b.occVal[b.occ] = vid;
+      b.occPos[b.occ++] = p;
     };
     // property tables are read row by row: per table, the column of each key and the text of each
     // value are resolved once, so no per-node object is decoded
@@ -497,7 +506,7 @@ function finishColumn(b: ColumnBuild, nodeCount: number): Column {
     if (x !== x) numeric = false;
   }
   // postings by counting sort; occurrences arrive in preorder, so each run is sorted
-  const O = b.occVal.length;
+  const O = b.occ;
   const postStart = new Int32Array(D + 1);
   for (let i = 0; i < O; i++) postStart[rank[b.occVal[i]] + 1]++;
   for (let i = 0; i < D; i++) postStart[i + 1] += postStart[i];

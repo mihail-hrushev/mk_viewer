@@ -129,7 +129,12 @@ The metadata of a model is a tree, not per-object records. `HierarchyStore` (`sr
 keeps it columnar: a parent column, an objectId column (NaN for group nodes), and names and
 properties that are either stored sparsely in maps or resolved lazily through per-batch callbacks
 (the glTF plugin keeps its parsed `nodes` array and answers `name(i)` / `properties(i)` from it, so
-nothing is copied). Children (CSR) and the objectId -> node table are built on first use. Files
+nothing is copied), or held as **property tables** (`addPropertyTable`): for a run of nodes, typed
+arrays of rows (`rowStart` per node, `key` and `value` indices per row) over a list of distinct
+`[group, name]` keys and a list of distinct values. The glTF plugin fills one from the
+`MK_property_table` extension with zero-copy views on the BIN chunk; a node's object
+`{ group: { name: value } }` is decoded only when asked for, and the index reads the rows directly.
+A node with no rows falls through to the other sources. Children (CSR) and the objectId -> node table are built on first use. Files
 like Navisworks or PCF exports put the properties on the *group* nodes (isometric, spool) and leave
 the mesh leaves bare, so `hierarchy.properties(node, inherited)` merges the ancestors on demand,
 nearer nodes winning, instead of copying group data onto every leaf.
@@ -147,7 +152,10 @@ on the first query (or `model.properties.build()`) and dropped on unload:
   grammar; NaN otherwise; `numeric` when every value parses) and CSR postings `postStart` /
   `postNode` from value id to the sorted preorder positions of the nodes carrying it. Nested
   property objects flatten to dotted keys, arrays to repeated values, node names go under the key
-  `name`. Everything after the build is typed arrays plus the string dictionaries.
+  `name`. Rows of a property table skip the objects: per table, the column of each key
+  (`group.name`) and the trimmed text of each value are resolved once and every row is one
+  dictionary lookup, so the column is the same as for the equivalent nested object. Everything
+  after the build is typed arrays plus the string dictionaries.
 - **Queries** resolve a value range in the dictionary by binary search (`equals`, `startsWith`,
   numeric `min` / `max` over a lazily built numeric order), or, for `in` lists of thousands of
   values, sort the inputs once and merge-walk them against the dictionary in one linear pass,
@@ -162,6 +170,10 @@ on the first query (or `model.properties.build()`) and dropped on unload:
 `viewer.findObjects` runs the query on every loaded model and merges the results (ids of
 different models never collide); `viewer.propertyKeys` merges the key lists. For SPOOLS-811
 (5.3k nodes, 14 keys) the index builds in about 13 ms and a 770-value list query takes about 2 ms.
+For a 166,792-node Navisworks precast export (3.6M property rows, 85 keys, 390k distinct values) as
+`MK_property_table`, the GLB is 59 MB instead of 221 MB with `extras`, loads in 0.4 s instead of
+2.5 s, the index builds in 0.7 s instead of 3.0 s, and the heap after indexing is about 200 MB
+instead of 600 MB (node, mock viewer).
 
 ## Culling and ordering
 

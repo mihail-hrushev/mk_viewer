@@ -502,7 +502,12 @@ parents, and per-node properties through `hierarchy.properties(node, inherited)`
 
 The glTF plugin reads glTF 2.0 / GLB with `EXT_mesh_gpu_instancing` and `KHR_mesh_quantization`.
 Textures are ignored. `createGltfLoader(options)` sets the objectId granularity and plugs in decoders
-for compressed meshes.
+for compressed meshes. Node properties come from node `extras`, or from the `MK_property_table` root
+extension that the MK Navisworks plugin writes: the distinct `[category, property]` keys and the
+distinct values listed once in the JSON, and three integer accessors in the binary chunk (per node
+the start of its rows, per row a key index and a value index). It is a fraction of the size of the
+same data as `extras` and is read without building an object per node; see
+[docs/MK_property_table.md](docs/MK_property_table.md).
 
 The IFC plugin reads `.ifc` files (IFC2X3, IFC4, IFC4X3) with its own STEP reader and geometry
 kernel, so it adds no dependency. It is built for speed over detail:
@@ -536,7 +541,10 @@ A 16 MB Tekla Structures export (13,430 products, 10,758 bolts) loads in 1.2 s t
 ### Properties and search
 
 Every node of a model's hierarchy can carry properties: plain key / value pairs. The glTF plugin
-takes them from the `extras` object of each node, group nodes included. Exports from plant and BIM
+takes them from the `extras` object of each node, group nodes included, or from the
+`MK_property_table` extension when the file has one (MK Navisworks exports): there each node's
+properties read as `{ [category]: { [property]: value } }`, exactly as the same data in `extras`
+would, and are searched under the keys `Category.Property`. Exports from plant and BIM
 tools (Navisworks, PCF converters) usually put the data on the groups (an isometric, a spool) and
 leave the mesh leaves bare, so a lookup can include the ancestors:
 

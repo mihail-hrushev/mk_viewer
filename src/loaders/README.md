@@ -53,6 +53,7 @@ Download progress is reported for you.
 | `createGeometry / createMaterial / addMesh / addMeshes` | tracked versions of the `ViewerApi` calls: the model owns what they create |
 | `allocObjectIds(n)` | scene-unique objectIds (meshes without an objectId get a fresh one automatically) |
 | `hierarchy.addNode(parent, name?, objectId?, properties?)`, `hierarchy.addNodes(parents, objectIds?, nameFn?, propertiesFn?)` | metadata tree stored in columns; names and properties can be resolved lazily |
+| `hierarchy.addPropertyTable(first, table)` | properties of a run of nodes as rows over distinct keys / values (typed arrays, decoded on demand) |
 | `setProperties(objectId, props)`, `setPropertyProvider(fn)` | sparse explicit properties, or lazy lookup |
 | `shouldYield() / yield() / yieldIfNeeded()` | cooperative time slicing (default 8 ms per slice) |
 | `progress(f, stage)`, `warn(msg)`, `signal`, `throwIfAborted()` | reporting and cancellation |
@@ -71,6 +72,13 @@ nothing for `model.properties.find` and `viewer.findObjects` to search them. Nod
 searchable too, under the key `name`. Nested objects are indexed as dotted keys and arrays as
 repeated values, but flat string / number values are what users search best. `setProperties` /
 `setPropertyProvider` answer `model.getProperties(objectId)` but are not indexed.
+
+When the format stores properties as a table (distinct keys and values plus integer rows, like the
+glTF `MK_property_table` extension), pass it as is with `hierarchy.addPropertyTable(first, table)`
+after adding the nodes: `table.rowStart[i] .. rowStart[i + 1] - 1` are the rows of node `first + i`,
+`key[r]` indexes `table.keys` (`[group, name]` pairs) and `value[r]` indexes `table.values`. A node
+with rows then has the properties `{ [group]: { [name]: value } }`, decoded only when asked for,
+and the index reads the rows without decoding; a node without rows keeps what `addNodes` gave it.
 
 ```ts
 const spool = ctx.hierarchy.addNode(iso, 'S-0042', NaN, { Spool: 'S-0042', Weight: 182.5 });
