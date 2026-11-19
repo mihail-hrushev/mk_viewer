@@ -4,15 +4,26 @@
  * them; shift / ctrl + click adds further nodes to the selection (or removes them); selecting
  * objects on the canvas highlights and reveals their nodes. Rows are virtualised, so trees with
  * hundreds of thousands of nodes stay responsive.
+ *
+ * The host can add groups of virtual nodes that belong to no model (`addGroup`), e.g. objects it
+ * draws itself; the tree shows and filters them and reports clicks, and the host decides what a
+ * click does and which of its nodes are highlighted (`setGroupSelection`).
+ *
+ * Every top-level row with a show / hide state has an eye button: a model row shows / hides the
+ * model (`model.setVisible`) and follows `model.visible` on the viewer's `visibility` event; a group
+ * row has one when the group provides `visible` and `setVisible`. Hidden rows are dimmed.
  */
 import type { ViewerApi } from '../types';
 import type { Model } from '../loaders/types';
 import { Panel } from './Panel';
-import { TreeModel, type TreeSource } from './TreeModel';
+import { TreeModel, type TreeSource, type VirtualTreeClick, type VirtualTreeGroup } from './TreeModel';
 
 const ROW_HEIGHT = 26;
 const INDENT = 14;
 const FILTER_DELAY_MS = 150;
+/** Eye of a shown / hidden row (stroke icons, 16 x 16). */
+const EYE_OPEN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+const EYE_SHUT = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 13.5l11-11"/></svg>';
 /** Rows drawn above and below the visible window. */
 const OVERSCAN = 6;
 const KEY_BASE = 2 ** 32;
@@ -45,6 +56,10 @@ export class HierarchyPanel {
   private readonly unsubscribe: (() => void)[] = [];
   /** Highlighted nodes, as nodeKey(model index, node). */
   private readonly active = new Set<number>();
+  /** Highlighted virtual nodes per group id (set by the host). */
+  private readonly groupActive = new Map<string, Set<string>>();
+  /** `onChanged` unsubscribers per group id. */
+  private readonly groupOffs = new Map<string, () => void>();
   /** When set, what a selection highlights (the selection plugin: the nodes at its level). */
   private nodeProvider: SelectedNodesProvider | null = null;
   /** Told which rows a tree click selected (`onNodeSelection`). */
@@ -82,6 +97,7 @@ export class HierarchyPanel {
     this.scroller.append(this.spacer);
     this.scroller.addEventListener('scroll', () => this.queueDraw(), { passive: true });
     this.scroller.addEventListener('click', (e) => this.onClick(e));
+    this.scroller.addEventListener('dblclick', (e) => this.onDoubleClick(e));
 
     this.panel.body.append(search, this.scroller);
     // redraw the visible rows whenever the list area changes size (panel opened, canvas resized)
@@ -92,6 +108,7 @@ export class HierarchyPanel {
       viewer.on('modelLoaded', () => this.syncModels()),
       viewer.on('modelUnloaded', () => this.syncModels()),
       viewer.on('selection', (ids) => this.onSelection(ids)),
+      viewer.on('visibility', () => this.updateVisibility()),
     );
     this.syncModels();
   }
@@ -145,8 +162,101 @@ export class HierarchyPanel {
     };
   }
 
+  /**
+   * Adds a top-level group of host-provided virtual nodes (not part of any model), e.g. objects the
+   * host draws itself. It is shown after the loaded models (before them with a negative `order`),
+   * also when no model is loaded, and the name filter covers its nodes. A click on a node calls
+   * `group.onClick` and leaves the viewer's selection alone. A group with the same id is replaced
+   * (keeping its expansion state). Returns a function that removes the group.
+   */
+  addGroup(group: VirtualTreeGroup): () => void {
+    this.groupOffs.get(group.id)?.();
+    this.groupOffs.delete(group.id);
+    this.tree.addGroup(group);
+    if (group.onChanged) {
+      try {
+        const off = group.onChanged(() => {
+          if (this.tree.groupList.includes(group)) this.refreshGroups(group.id);
+        });
+        if (typeof off === 'function') this.groupOffs.set(group.id, off);
+      } catch (e) {
+        console.error(`mk-viewer: error in onChanged() of model tree group '${group.id}'`, e);
+      }
+    }
+    this.afterGroupChange();
+    return () => {
+      // only if this very group is still registered (not replaced by one with the same id)
+      if (this.tree.groupList.includes(group)) this.removeGroup(group.id);
+    };
+  }
+
+  /** Removes the group with this id (and its highlighted nodes); false when there is none. */
+  removeGroup(id: string): boolean {
+    if (!this.tree.removeGroup(id)) return false;
+    this.groupOffs.get(id)?.();
+    this.groupOffs.delete(id);
+    this.groupActive.delete(id);
+    this.afterGroupChange();
+    return true;
+  }
+
+  /**
+   * Re-reads `children()` of the group with this id, or of every group; expansion and highlight
+   * state are kept by node id. Groups with `onChanged` refresh themselves.
+   */
+  refreshGroups(id?: string): void {
+    this.tree.refreshGroup(id);
+    this.afterGroupChange();
+  }
+
+  /**
+   * Highlights these nodes of a group (replacing its highlighted nodes; [] clears them), the way
+   * the tree highlights the nodes of a canvas selection. With `reveal` (default true) the first
+   * node is shown in the open tree: its ancestors are expanded and it is scrolled into view. The
+   * viewer's selection and the highlighted model nodes are not touched.
+   */
+  setGroupSelection(groupId: string, nodeIds: readonly string[], options?: { reveal?: boolean }): void {
+    if (nodeIds.length === 0) this.groupActive.delete(groupId);
+    else this.groupActive.set(groupId, new Set(nodeIds));
+    if (nodeIds.length > 0 && options?.reveal !== false && this.isOpen) {
+      const row = this.tree.revealGroupNode(groupId, nodeIds[0]);
+      if (row >= 0) {
+        this.scrollToRow(row);
+        return;
+      }
+    }
+    this.draw();
+  }
+
+  /** The highlighted nodes of a group (`setGroupSelection`). */
+  getGroupSelection(groupId: string): string[] {
+    return Array.from(this.groupActive.get(groupId) ?? []);
+  }
+
+  /**
+   * Expands the ancestors of a group node and scrolls it into view when the tree is open. False
+   * when the node is unknown or hidden by the filter.
+   */
+  revealGroupNode(groupId: string, nodeId: string): boolean {
+    const row = this.tree.revealGroupNode(groupId, nodeId);
+    if (row < 0) return false;
+    this.scrollToRow(row);
+    return true;
+  }
+
+  /**
+   * Re-reads the show / hide state of every model and group row (their eyes). Runs on the viewer's
+   * `visibility` event; groups whose `visible()` changed for another reason signal it through
+   * `onChanged` or `refreshGroups`.
+   */
+  updateVisibility(): void {
+    if (this.tree.readVisibility()) this.queueDraw();
+  }
+
   dispose(): void {
     clearTimeout(this.filterTimer);
+    for (const off of this.groupOffs.values()) off();
+    this.groupOffs.clear();
     for (const off of this.unsubscribe) off();
     this.resizeObserver.disconnect();
     this.panel.dispose();
@@ -158,7 +268,10 @@ export class HierarchyPanel {
     const list: TreeSource[] = [];
     for (const m of this.viewer.models) {
       let s = this.sources.get(m);
-      if (!s) this.sources.set(m, (s = { name: m.name, hierarchy: m.hierarchy }));
+      if (!s) {
+        s = { name: m.name, hierarchy: m.hierarchy, visible: () => m.visible, setVisible: (on: boolean) => m.setVisible(on) };
+        this.sources.set(m, s);
+      }
       list.push(s);
     }
     for (const m of this.sources.keys()) if (!this.viewer.models.includes(m)) this.sources.delete(m);
@@ -179,13 +292,79 @@ export class HierarchyPanel {
     this.count.textContent = this.tree.filterText ? `${this.tree.matchCount.toLocaleString()} found` : '';
   }
 
+  private afterGroupChange(): void {
+    this.updateCount();
+    this.queueDraw();
+  }
+
+  /** Row index of the clicked row element, or -1. */
+  private rowOf(e: MouseEvent): number {
+    const rowEl = (e.target as HTMLElement).closest<HTMLElement>('.mkv-row');
+    const row = rowEl ? Number(rowEl.dataset.row) : -1;
+    return row >= 0 && row < this.tree.rowCount ? row : -1;
+  }
+
+  /** Runs a host callback of a virtual group, logging what it throws. */
+  private callGroup(group: VirtualTreeGroup, what: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`mk-viewer: error in ${what} of model tree group '${group.id}'`, err);
+    }
+  }
+
+  /** Virtual group rows: the caret and the header expand / collapse, the rest goes to the host. */
+  private onGroupClick(e: MouseEvent, row: number): void {
+    const tree = this.tree;
+    const group = tree.groupOf(row);
+    if (!group) return;
+    const click: VirtualTreeClick = { additive: e.shiftKey || e.ctrlKey || e.metaKey, event: e };
+    const header = tree.isModelRow(row);
+    if ((e.target as HTMLElement).classList.contains('mkv-caret') || header) {
+      if (tree.hasChildren(row)) {
+        tree.toggle(row);
+        this.draw();
+      }
+      if (header && group.onHeaderClick) this.callGroup(group, 'onHeaderClick', () => group.onHeaderClick?.(click));
+      return;
+    }
+    const node = tree.groupNode(row);
+    if (node && group.onClick) this.callGroup(group, 'onClick', () => group.onClick?.(node, click));
+  }
+
+  /** Eye button of a header: show / hide its model or group; nothing else happens. */
+  private onEyeClick(e: MouseEvent, row: number): void {
+    e.stopPropagation();
+    if (this.tree.toggleVisibility(row)) this.draw();
+  }
+
+  private isEye(e: MouseEvent): boolean {
+    return !!(e.target as HTMLElement).closest('.mkv-eye');
+  }
+
+  private onDoubleClick(e: MouseEvent): void {
+    const row = this.rowOf(e);
+    if (row < 0 || this.isEye(e) || (e.target as HTMLElement).classList.contains('mkv-caret')) return;
+    const group = this.tree.groupOf(row);
+    const node = this.tree.groupNode(row);
+    if (!group || !node || !group.onDoubleClick) return;
+    const click: VirtualTreeClick = { additive: e.shiftKey || e.ctrlKey || e.metaKey, event: e };
+    this.callGroup(group, 'onDoubleClick', () => group.onDoubleClick?.(node, click));
+  }
+
   private onClick(e: MouseEvent): void {
     const target = e.target as HTMLElement;
-    const rowEl = target.closest<HTMLElement>('.mkv-row');
-    if (!rowEl) return;
-    const row = Number(rowEl.dataset.row);
+    const row = this.rowOf(e);
+    if (row < 0) return;
+    if (this.isEye(e)) {
+      this.onEyeClick(e, row);
+      return;
+    }
     const tree = this.tree;
-    if (!(row >= 0 && row < tree.rowCount)) return;
+    if (tree.isGroupRow(row)) {
+      this.onGroupClick(e, row);
+      return;
+    }
     if (target.classList.contains('mkv-caret') || tree.isModelRow(row)) {
       if (tree.hasChildren(row)) {
         tree.toggle(row);
@@ -296,6 +475,12 @@ export class HierarchyPanel {
       this.draw();
       return;
     }
+    this.scrollToRow(row);
+  }
+
+  /** Scrolls `row` into view (centred when it was outside) and draws. */
+  private scrollToRow(row: number): void {
+    if (!this.isOpen) return;
     const top = row * ROW_HEIGHT;
     const view = this.scroller;
     // revealing added rows: grow the scroll range before scrolling into it
@@ -330,13 +515,21 @@ export class HierarchyPanel {
     }
     const first = Math.max(0, Math.floor(this.scroller.scrollTop / ROW_HEIGHT) - OVERSCAN);
     const last = Math.min(tree.rowCount, Math.ceil((this.scroller.scrollTop + this.scroller.clientHeight) / ROW_HEIGHT) + OVERSCAN);
+    // rows are redrawn from scratch: keep the keyboard focus on an eye button (Enter / Space)
+    const focused = doc.activeElement as HTMLElement | null;
+    const focusRow = focused?.classList.contains('mkv-eye') && spacer.contains(focused) ? (focused.closest<HTMLElement>('.mkv-row')?.dataset.row ?? '') : '';
     const rows: HTMLElement[] = [];
     for (let r = first; r < last; r++) {
       const row = doc.createElement('div');
+      const group = tree.groupOf(r);
+      const vnode = tree.groupNode(r);
       let cls = 'mkv-row';
-      if (tree.isModelRow(r)) cls += ' mkv-model';
+      if (tree.isModelRow(r)) cls += group ? ' mkv-model mkv-group' : ' mkv-model';
       if (tree.isMatch(r)) cls += ' mkv-match';
-      if (!tree.isModelRow(r) && this.active.has(nodeKey(tree.rowModel[r], tree.rowNode[r]))) cls += ' mkv-active';
+      if (!tree.isShown(r)) cls += ' mkv-hidden';
+      if (group) {
+        if (vnode && this.groupActive.get(group.id)?.has(vnode.id)) cls += ' mkv-active';
+      } else if (!tree.isModelRow(r) && this.active.has(nodeKey(tree.rowModel[r], tree.rowNode[r]))) cls += ' mkv-active';
       row.className = cls;
       row.dataset.row = String(r);
       row.style.top = `${r * ROW_HEIGHT}px`;
@@ -348,9 +541,35 @@ export class HierarchyPanel {
       const label = doc.createElement('span');
       label.className = 'mkv-label';
       label.textContent = label.title = tree.label(r);
-      row.append(caret, label);
+      row.append(caret);
+      if (group && !vnode && group.icon) {
+        const icon = doc.createElement('span');
+        icon.className = 'mkv-icon';
+        icon.textContent = group.icon;
+        row.append(icon);
+      }
+      row.append(label);
+      if (vnode?.badge) {
+        const badge = doc.createElement('span');
+        badge.className = 'mkv-badge';
+        badge.style.background = vnode.badge.color;
+        if (vnode.badge.title) badge.title = vnode.badge.title;
+        row.append(badge);
+      }
+      if (tree.hasVisibility(r)) {
+        const shown = tree.isShown(r);
+        const eye = doc.createElement('button');
+        eye.type = 'button';
+        eye.className = 'mkv-eye';
+        eye.title = shown ? 'Hide' : 'Show';
+        eye.setAttribute('aria-label', `${shown ? 'Hide' : 'Show'} ${tree.label(r)}`);
+        eye.setAttribute('aria-pressed', String(shown));
+        eye.innerHTML = shown ? EYE_OPEN : EYE_SHUT;
+        row.append(eye);
+      }
       rows.push(row);
     }
     spacer.replaceChildren(...rows);
+    if (focusRow) spacer.querySelector<HTMLElement>(`.mkv-row[data-row="${focusRow}"] .mkv-eye`)?.focus({ preventScroll: true });
   }
 }

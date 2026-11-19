@@ -7,7 +7,7 @@
  * file kinds can be claimed by `addFileHandler` (the status plugin takes CSV row files).
  */
 import type { ViewerApi } from '../types';
-import type { LoadTask } from '../loaders/types';
+import type { LoadTask, Model } from '../loaders/types';
 import { Panel } from './Panel';
 
 interface RunningLoad {
@@ -27,6 +27,8 @@ export class ModelsPanel {
   private readonly envBox: HTMLElement;
   private readonly loads = new Map<LoadTask, RunningLoad>();
   private readonly unsubscribe: (() => void)[] = [];
+  /** Show / hide checkbox per listed model (kept in step on the `visibility` event). */
+  private readonly visBoxes = new Map<Model, HTMLInputElement>();
   private readonly fileHandlers: ((file: File) => boolean)[] = [];
 
   constructor(viewer: ViewerApi, parent: HTMLElement, onToggle?: (open: boolean) => void) {
@@ -71,6 +73,9 @@ export class ModelsPanel {
       viewer.on('modelLoaded', () => this.drawModels()),
       viewer.on('modelUnloaded', () => this.drawModels()),
       viewer.on('environment', () => this.drawEnvironment()),
+      viewer.on('visibility', () => {
+        for (const [m, box] of this.visBoxes) box.checked = m.visible;
+      }),
     );
     this.drawModels();
     this.drawEnvironment();
@@ -205,8 +210,10 @@ export class ModelsPanel {
     const doc = this.element.ownerDocument;
     const viewer = this.viewer;
     const rows: HTMLElement[] = [];
+    this.visBoxes.clear();
     for (const m of viewer.models) {
       const vis = doc.createElement('input');
+      this.visBoxes.set(m, vis);
       vis.type = 'checkbox';
       vis.checked = m.visible;
       vis.title = 'Show / hide';

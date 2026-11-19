@@ -5,9 +5,15 @@
  * Every table is 5 meshes (top + 4 legs) sharing one objectId, so it picks, highlights, hides and
  * recolours as one object. Click / tap selects, ctrl/shift-click toggles, a click on the background
  * clears the selection.
+ *
+ * The built-in UI's Tree panel shows a host-provided group "Building" (`ui.hierarchy.addGroup`):
+ * the scene is built from code, so there is no model tree, and the page lists its floors and their
+ * tables itself, with a green / red badge for shown / hidden. Clicking a row selects and frames its
+ * objects; the group follows the selection and the Hide / Show all buttons. The eye on the group
+ * header shows / hides the whole building (`visible` / `setVisible` of the group).
  */
-import { Viewer } from '../src/index';
-import type { Color } from '../src/index';
+import { Viewer, createViewerUi } from '../src/index';
+import type { Color, VirtualTreeNode } from '../src/index';
 import { $, captureErrors, expose, translation } from './shared';
 
 const viewer = new Viewer($<HTMLCanvasElement>('c'));
@@ -34,9 +40,14 @@ function object(name: string, parts: { material: number; transform: number[]; ge
 }
 
 const floorIds: number[] = [];
+/** Every object of each floor (slab, columns, tables, facades), and its tables. */
+const floorObjects: number[][] = [];
+const floorTables: number[][] = [];
 for (let f = 0; f < FLOORS; f++) {
   const y = f * H;
+  const first = nextId;
   floorIds.push(object(`slab ${f}`, [{ material: concrete, transform: translation(0, y - 0.15, 0, W, 0.3, D) }]));
+  floorTables.push([]);
   for (let i = 0; i < 5; i++) {
     for (let j = 0; j < 4; j++) {
       object(`column ${f}.${i}.${j}`, [{ geometry: column, material: steel, transform: translation(-8 + i * 4, y, -6 + j * 4, 1, H - 0.3, 1) }]);
@@ -48,11 +59,13 @@ for (let f = 0; f < FLOORS; f++) {
       material: wood,
       transform: translation(x + dx, y + 0.375, z + dz, 0.08, 0.75, 0.08),
     }));
+    floorTables[f].push(nextId);
     object(`table ${f}.${t}`, [{ material: wood, transform: translation(x, y + 0.78, z, 1.9, 0.06, 1), }, ...legs]);
   }
   for (const side of [-1, 1]) {
     object(`facade ${f} ${side < 0 ? 'north' : 'south'}`, [{ material: glass, transform: translation(0, y + H / 2 - 0.15, side * (D / 2 - 0.05), W - 0.2, H - 0.3, 0.05) }]);
   }
+  floorObjects.push(Array.from({ length: nextId - first }, (_, i) => first + i));
 }
 object('roof', [{ material: concrete, transform: translation(0, FLOORS * H - 0.15, 0, W, 0.3, D) }]);
 viewer.setCamera({ eye: [24, 20, 26], target: [0, 6, 0] });
@@ -85,10 +98,7 @@ const actions: Record<string, () => void> = {
     viewer.setVisible(sel(), false);
     viewer.select([]);
   },
-  'show-all': () => {
-    viewer.showAll(); // ends isolation and shows hidden objects
-    hidden.clear();
-  },
+  'show-all': () => viewer.showAll(), // ends isolation and shows hidden objects
   colour: () => {
     viewer.setColor(sel(), palette[paint++ % palette.length]);
     for (const id of sel()) coloured.add(id);
@@ -126,4 +136,59 @@ slider.oninput = updateSection;
 flip.onchange = updateSection;
 updateSection();
 
-expose({ viewer, errors, names, updateSection });
+// --- host-provided nodes in the model tree ----------------------------------------------------------
+const ui = createViewerUi(viewer);
+/** Objects of a tree node id: 'floor:2' (the whole floor) or 'obj:17' (one table). */
+const objectsOf = (id: string): number[] => (id.startsWith('floor:') ? floorObjects[Number(id.slice(6))] : [Number(id.slice(4))]);
+const badge = (ids: number[]) => (ids.every((id) => hidden.has(id)) ? { color: '#ea4335', title: 'hidden' } : { color: '#34a853', title: 'shown' });
+let treeChanged = (): void => {};
+const allObjects = Array.from(names.keys());
+ui.hierarchy.addGroup({
+  id: 'building',
+  label: 'Building',
+  icon: '▦',
+  // the eye on the header: shown unless every object is hidden
+  visible: () => !allObjects.every((id) => hidden.has(id)),
+  setVisible: (on) => {
+    if (on) hidden.clear();
+    else for (const id of allObjects) hidden.add(id);
+    viewer.setVisible(allObjects, on); // its visibility event refreshes the badges
+  },
+  children: (): VirtualTreeNode[] =>
+    floorObjects.map((ids, f) => ({
+      id: `floor:${f}`,
+      label: `Floor ${f}`,
+      badge: badge(ids),
+      children: floorTables[f].map((t) => ({ id: `obj:${t}`, label: names.get(t) ?? `object ${t}`, badge: badge([t]) })),
+    })),
+  // the host decides what a click does: here select (shift/ctrl adds) and frame the node's objects
+  onClick: (node, { additive }) => {
+    const ids = objectsOf(node.id);
+    viewer.select(additive ? [...new Set([...viewer.getSelection(), ...ids])] : ids);
+    viewer.zoomToObjects(viewer.getSelection(), true);
+  },
+  onDoubleClick: (node) => viewer.isolate(objectsOf(node.id)),
+  onHeaderClick: () => viewer.fitToView(undefined, true),
+  onChanged: (listener) => {
+    treeChanged = listener;
+    return () => (treeChanged = () => {});
+  },
+});
+// highlight the nodes whose objects are all selected; badges follow hide / show all
+viewer.on('selection', (ids) => {
+  const sel = new Set(ids);
+  const nodes: string[] = [];
+  floorObjects.forEach((objs, f) => {
+    if (objs.every((id) => sel.has(id))) nodes.push(`floor:${f}`);
+    else for (const t of floorTables[f]) if (sel.has(t)) nodes.push(`obj:${t}`);
+  });
+  ui.hierarchy.setGroupSelection('building', nodes);
+});
+// Show all (button, toolbar, context menu) shows everything again: re-read badges and the eye
+viewer.on('visibility', ({ cause }) => {
+  if (cause === 'showAll') hidden.clear();
+  treeChanged();
+});
+ui.hierarchy.open();
+
+expose({ viewer, ui, errors, names, updateSection });

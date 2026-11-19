@@ -61,6 +61,7 @@ export type {
   ScreenshotPixels,
   ViewerStats,
   ViewerEvents,
+  VisibilityChange,
   Primitives,
   PropertySearch,
   ViewerApi,

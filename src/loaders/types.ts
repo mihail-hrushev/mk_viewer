@@ -392,7 +392,14 @@ export interface Model {
   readonly objectIdRange: { first: number; count: number };
   /** Current placement (LoadOptions.transform, or the last `setTransform`); identity when none. */
   readonly transform: Float64Array;
-  /** False after `setVisible(false)`. */
+  /**
+   * Model-level visibility: false after `setVisible(false)`, true again after `setVisible(true)`,
+   * `isolate()`, `viewer.showAll()` / `viewer.isolate(null)`, a `viewer.isolate(ids)` or
+   * `viewer.setVisible(ids, true)` that includes any of its objects; false after a
+   * `viewer.isolate(ids, true)` that includes none of them. Hiding single objects with
+   * `viewer.setVisible(ids, false)` and ghosting do not change it. The `visibility` event reports
+   * changes.
+   */
   readonly visible: boolean;
   readonly warnings: readonly string[];
   readonly info: Readonly<Record<string, unknown>>;

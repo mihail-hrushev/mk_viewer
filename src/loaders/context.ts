@@ -435,6 +435,11 @@ export class ModelImpl implements Model {
     for (let r = 0; r < o.len; r += 2) this.viewer.setVisible({ first: o.data[r], count: o.data[r + 1] }, visible);
   }
 
+  /** Internal (the Viewer): records a model-level visibility change made by object-level calls. */
+  markVisible(visible: boolean): void {
+    if (!this._unloaded && this.objects.total > 0) this._visible = visible;
+  }
+
   isolate(hideOthers = false): void {
     if (this._unloaded) return;
     this._visible = true;

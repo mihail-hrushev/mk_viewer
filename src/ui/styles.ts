@@ -66,6 +66,14 @@ const CSS = `
 .mkv-caret{flex:0 0 22px;height:100%;display:flex;align-items:center;justify-content:center;color:#9aa0a6;font-size:10px}
 .mkv-label{overflow:hidden;text-overflow:ellipsis;padding-right:8px}
 .mkv-row.mkv-match .mkv-label{color:#fdd663}
+.mkv-icon{flex:0 0 auto;margin-right:6px;color:#9aa0a6}
+.mkv-badge{flex:0 0 8px;width:8px;height:8px;margin-right:8px;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+.mkv-eye{flex:0 0 26px;width:26px;height:22px;margin:0 4px 0 auto;padding:0;display:flex;align-items:center;justify-content:center;
+  border:0;border-radius:4px;background:transparent;color:#9aa0a6;cursor:pointer}
+.mkv-eye:hover{background:#3c4043;color:#e8eaed}
+.mkv-eye:focus-visible{outline:2px solid #8ab4f8;outline-offset:-2px}
+.mkv-eye svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.mkv-row.mkv-hidden>:not(.mkv-eye){opacity:.45}
 .mkv-menu{position:absolute;min-width:170px;padding:4px;display:flex;flex-direction:column;pointer-events:auto;touch-action:manipulation;
   background:rgba(32,33,36,.97);border:1px solid #3c4043;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
 .mkv-menu[hidden]{display:none}

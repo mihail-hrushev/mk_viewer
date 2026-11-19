@@ -219,6 +219,7 @@ export function createMockViewer(opts: { keepData?: boolean } = {}): MockViewer 
       calls.setVisible++;
       forObjects(ids, (m) => (m.visible = visible));
     },
+    setPickable() {},
     isolate() {},
     setColor() {},
     getColor: () => null,

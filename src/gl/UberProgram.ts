@@ -71,7 +71,7 @@ export class UberProgram {
   // Persistent settings, re-applied after a context restore.
   private lighting: LightingParams = DEFAULT_LIGHTING;
   private readonly upView = new Float32Array([0, 1, 0]);
-  private readonly ghost = new Float32Array([0.6, 0.65, 0.7, 0.12]);
+  private readonly ghost = new Float32Array([0.6, 0.65, 0.7, 0.22]);
   private sectionCount = 0;
   private env: EnvironmentUniforms | null = null;
   private readonly envSh = new Float32Array(27);
@@ -225,11 +225,12 @@ export class UberProgram {
    * caller's job, see `applyPassState`.
    *  - opaque:        visible, not ghosted, opaque materials; writes colour + id
    *  - transparent:   visible, not ghosted, transparent materials; premultiplied colour, no id
-   *  - transparentId: same fragments as transparent, writes ids (draw with drawBuffers 'id')
+   *  - transparentId: same fragments as transparent minus NotPickable ones, writes ids (draw with
+ *                   drawBuffers 'id'); not-pickable fragments write neither id nor depth
    *  - ghost:         visible + ghosted, any material; faint colour, no id
    *  - ghostHidden:   hidden (Hidden set, Visible clear; removed slots have neither), any material,
    *                   ghosted or not; faint colour, no id (the ghost-hidden mode)
-   *  - selectedId:    visible + selected, not ghosted, any material; writes ids (the selection x-ray
+   *  - selectedId:    visible + selected, not ghosted, pickable, any material; writes ids (the selection x-ray
    *                   pass: draw with drawBuffers 'id' into a target of its own)
    * `materialFilter` false skips the per-vertex material opacity test (use when draw items are
    * already split into opaque / transparent).
@@ -258,6 +259,9 @@ export class UberProgram {
       case 'transparentId':
         kind = PassKind.Transparent;
         filter = MaterialFilter.TransparentOnly;
+        // not-pickable fragments are skipped entirely: no id and no depth, so a pick passes
+        // through them to whatever is behind (the opaque id + depth already in the target)
+        mask |= FragFlags.NotPickable;
         writeId = 1;
         break;
       case 'ghost':
@@ -270,7 +274,7 @@ export class UberProgram {
         value = H;
         break;
       case 'selectedId':
-        mask = V | G | FragFlags.Selected;
+        mask = V | G | FragFlags.Selected | FragFlags.NotPickable;
         value = V | FragFlags.Selected;
         writeId = 1;
         break;

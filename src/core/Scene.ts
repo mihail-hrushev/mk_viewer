@@ -238,6 +238,15 @@ export class Scene {
   }
 
   /**
+   * Sets (pickable false) or clears the NotPickable flag on every mesh of these objects. Other flag
+   * bits are kept, and no other flag update touches NotPickable.
+   */
+  setPickable(objectIds: ObjectSelection, pickable: boolean): void {
+    const N = FragFlags.NotPickable;
+    forEachObject(objectIds, (id) => this.objectFlags(id, pickable ? 0 : N, pickable ? N : 0));
+  }
+
+  /**
    * Shows only these objects (made visible, un-ghosted); others are ghosted, or hidden when
    * hideOthers. `null` ends isolation (same as showAll()).
    */

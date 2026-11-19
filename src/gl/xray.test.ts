@@ -73,14 +73,14 @@ describe('RenderTargets without a colour attachment', () => {
 });
 
 describe('selectedId pass', () => {
-  it('draws visible, selected, non-ghosted fragments of any material with ids, depth LESS, no blend', () => {
+  it('draws visible, selected, non-ghosted, pickable fragments of any material with ids, depth LESS, no blend', () => {
     const { ctx, fake } = createFakeContext();
     const gl = ctx.gl;
     const p = new UberProgram(ctx);
     fake.reset();
     p.setPass('selectedId', false);
     const u1ui = fake.callsOf('uniform1ui').map((c) => c.args[1]);
-    expect(u1ui).toEqual([FragFlags.Visible | FragFlags.Ghosted | FragFlags.Selected, FragFlags.Visible | FragFlags.Selected]);
+    expect(u1ui).toEqual([FragFlags.Visible | FragFlags.Ghosted | FragFlags.Selected | FragFlags.NotPickable, FragFlags.Visible | FragFlags.Selected]);
     const modes: string[] = [];
     const targets = { setDrawBuffers: (m: string) => modes.push(m) };
     applyPassState(ctx, targets, 'transparent'); // LEQUAL, no depth write, blend on

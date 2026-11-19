@@ -232,6 +232,16 @@ export interface MeshParams {
    * `viewer.load` gives every model its own group. Default 0.
    */
   batchGroup?: number;
+  /**
+   * False: the mesh is drawn as usual (opaque or transparent) but never picked. It writes no id,
+   * so `pick`, `snap`, hover, click selection, the context menu and the orbit pivot ignore it.
+   * A transparent non-pickable mesh writes no pick depth either, so a pick passes through it to the
+   * geometry behind (e.g. translucent volume boxes around a model). An opaque non-pickable mesh
+   * still hides what is behind it, so a pick on it hits nothing (resolves null) rather than the
+   * hidden geometry. Not-pickable meshes also get no hover / selection tint, outline or x-ray, since
+   * those are drawn from the id buffer. Change later with `viewer.setPickable`. Default true.
+   */
+  pickable?: boolean;
 }
 
 export interface MeshBatchParams {
@@ -243,6 +253,8 @@ export interface MeshBatchParams {
   objectIds?: ArrayLike<number>;
   /** See `MeshParams.batchGroup`. */
   batchGroup?: number;
+  /** See `MeshParams.pickable`; applies to every instance. Default true. */
+  pickable?: boolean;
 }
 
 export interface PickResult {
@@ -540,6 +552,19 @@ export interface ViewerEvents {
   pluginRemoved: { name: string; instance: PluginInstance };
   /** A context menu was requested (see `ContextMenuRequest`). */
   contextMenu: ContextMenuRequest;
+  /**
+   * Object visibility changed: `setVisible`, `isolate` or `showAll` was called (also through a
+   * model's `setVisible` / `isolate`, which may call `setVisible` once per objectId run). Emitted
+   * after the change, so `model.visible` is already up to date. UIs that mirror visibility (the eyes
+   * of the model tree, the Models panel) listen to it.
+   */
+  visibility: VisibilityChange;
+}
+
+/** Payload of the `visibility` event. */
+export interface VisibilityChange {
+  /** The viewer call that changed the visibility. */
+  readonly cause: 'setVisible' | 'isolate' | 'showAll';
 }
 
 /** Result of `viewer.findObjects`: the matches of all loaded models together. */
@@ -634,6 +659,12 @@ export interface ViewerApi {
 
   // --- per-object state; these take objectIds and affect every mesh carrying that id ---
   setVisible(objectIds: ObjectSelection, visible: boolean): void;
+  /**
+   * Makes every mesh of these objects pickable or not (see `MeshParams.pickable`). Independent of
+   * visibility, ghosting, isolation, selection and colour: none of those change it, and it changes
+   * none of them.
+   */
+  setPickable(objectIds: ObjectSelection, pickable: boolean): void;
   /** Show only these objects; everything else is ghosted (or hidden when `hideOthers`). */
   isolate(objectIds: ObjectSelection | null, hideOthers?: boolean): void;
   /**
@@ -736,7 +767,10 @@ export interface ViewerApi {
   propertyKeys(): PropertyKeyInfo[];
 
   // --- queries and effects ---
-  /** GPU pick at canvas CSS-pixel coordinates. */
+  /**
+   * GPU pick at canvas CSS-pixel coordinates. Ghosted meshes and meshes made non-pickable
+   * (`MeshParams.pickable`, `setPickable`) are not hit.
+   */
   pick(x: number, y: number): Promise<PickResult | null>;
   /**
    * GPU pick at canvas CSS pixel (x, y), then a "magnet" on the picked mesh: the nearest vertex

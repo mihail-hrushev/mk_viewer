@@ -146,12 +146,18 @@ parts plugins typically need are below.
 | `environment` | `EnvironmentInfo \| null` | the lighting environment changed |
 | `pluginInstalled` / `pluginRemoved` | `{ name, instance }` | a viewer plugin was installed / removed |
 | `contextMenu` | `ContextMenuRequest` | a context menu was requested (see below) |
+| `visibility` | `VisibilityChange` (`{ cause }`) | `setVisible`, `isolate` or `showAll` changed what is shown (also via a model); `model.visible` is already updated |
 
 ### Picking and selection
 
 - `await viewer.pick(x, y)` reads the GPU id buffer at canvas CSS pixel (x, y): `{ meshId,
   objectId, model?, position, distance }` or null. It reflects the image on screen, so objects the
   progressive renderer has not drawn yet are not pickable. It resolves a frame or two later.
+- Meshes added with `pickable: false` (`MeshParams` / `MeshBatchParams`) or switched with
+  `viewer.setPickable(ids, false)` write no pick id, and ghosted meshes neither: `pick`, `snap`,
+  hover, click selection, the context menu and the orbit pivot skip them. Transparent ones also write
+  no pick depth, so the pick reaches the geometry behind; an opaque one still occludes (pick resolves
+  null there). Use it for overlay geometry a plugin draws (markers, translucent volumes).
 - `viewer.select(objectIds)`, `viewer.getSelection()` (a copy), the `selection` event.
 - Clicks select by themselves (`autoSelect`, default on). Ctrl / shift click toggles.
 
@@ -168,6 +174,7 @@ viewer.getColor(objectId);              // [r, g, b, strength] or null when ther
 viewer.getColoredObjects();             // every object with an override, whoever set it
 viewer.clearColors();                   // remove every override
 viewer.setVisible(ids, false);
+viewer.setPickable(ids, false);         // drawn, but picks / hover / snap go past it
 viewer.isolate(ids);                    // ghost everything else (isolate(ids, true) hides it)
 viewer.showAll();
 viewer.getBounds(ids);                  // world bounds, float64
@@ -349,6 +356,12 @@ exists. Put toolbar code in the `ui(ui)` hook:
   (the topmost nodes whose subtree is entirely selected). `ui.hierarchy.updateSelection()` re-reads
   the selection when the answer changed without a selection change. `ui.hierarchy.onNodeSelection(
   (nodes) => ...)` reports the rows a click in the tree selected. The selection plugin uses both.
+- `ui.hierarchy.addGroup({ id, label, children: () => nodes, onClick, onChanged })` adds a group
+  of the plugin's own nodes (not part of any model) to the model tree; returns a function that
+  removes it. `ui.hierarchy.setGroupSelection(id, nodeIds)` highlights some of them. Give the group
+  `visible()` and `setVisible(on)` (type `TreeVisibility`) and its header gets a show / hide eye like
+  the model rows; signal state changes through `onChanged` (the eyes are also re-read on the viewer's
+  `visibility` event). See the README, "Host groups in the model tree".
 - Return a function that removes what you added. It runs on `ui.dispose()` and when the plugin is
   removed; call it from `dispose()` as well, in case the plugin is disposed without the UI knowing.
 

@@ -28,6 +28,7 @@ npm run dev     # then open http://localhost:5173/ (examples)
 - [Viewer plugins and the measurement tool](#viewer-plugins-and-the-measurement-tool)
 - [Controls](#controls)
 - [Built-in toolbar and model tree](#built-in-toolbar-and-model-tree)
+  - [Host groups in the model tree](#host-groups-in-the-model-tree)
 - [How it stays fast](#how-it-stays-fast)
 - [Performance](#performance)
 - [Limitations and known issues](#limitations-and-known-issues)
@@ -117,7 +118,7 @@ page plus one TypeScript file using only the public API.
 | [dynamic](examples/dynamic.ts) | meshes created, moved, recoloured and removed every frame |
 | [stress](examples/stress.ts) | `?n=3000000&m=100000`: millions of instanced + unique meshes, live stats, a benchmark |
 | [models](examples/models.ts) | open / drop / `?url=` several glTF, GLB, OBJ files; per-model show, hide, isolate, fit, unload |
-| [interaction](examples/interaction.ts) | selection events, isolate and ghosting, colour overrides, section planes, fit to selection |
+| [interaction](examples/interaction.ts) | selection events, isolate and ghosting, colour overrides, section planes, fit to selection, host nodes in the model tree |
 | [custom-loader](examples/custom-loader.ts) | a ~60-line loader plugin for a made-up format ([blox-loader.ts](examples/blox-loader.ts)) |
 | [dist-usage](examples/dist-usage/) | the built library without a bundler (run `npm run build` first) |
 
@@ -158,7 +159,7 @@ const glass = viewer.createMaterial({ color: [0.4, 0.65, 1, 0.35] }); // alpha <
 
 ### Meshes and bulk instancing
 
-`addMesh({ geometry, material, transform?, objectId? })` places a geometry and returns a `MeshId`.
+`addMesh({ geometry, material, transform?, objectId?, pickable? })` places a geometry and returns a `MeshId`.
 To place one geometry many times, pass all matrices in one `addMeshes` call (from
 [stress.ts](examples/stress.ts), which adds 3 million boxes this way):
 
@@ -169,6 +170,20 @@ if (N > 0) viewer.addMeshes({ geometry: viewer.primitives.box([1, 1, 1]), materi
 `transforms` holds 16 numbers per instance back to back (`Float32Array`, or `Float64Array` for
 large coordinates). `material` is one id or one per instance, `objectIds` is optional. It returns the
 first `MeshId`; the others follow consecutively.
+
+`pickable: false` (on `addMesh` or `addMeshes`) draws a mesh normally but keeps it out of picking:
+`pick`, `snap`, hover, click selection, the context menu and the orbit pivot ignore it. A
+transparent non-pickable mesh lets the pick through to the geometry behind it, which suits
+translucent helpers such as volume boxes drawn around a model:
+
+```ts
+const glass = viewer.createMaterial({ color: [0.2, 0.6, 1, 0.25] });
+viewer.addMesh({ geometry: viewer.primitives.box([4, 3, 2]), material: glass, transform, pickable: false });
+```
+
+An opaque non-pickable mesh still hides what is behind it, so a pick on it resolves null. Such meshes
+get no hover or selection tint (those are drawn from the pick ids). `setPickable(ids, pickable)`
+changes it per object later; visibility, isolation, selection and colours leave it alone.
 
 ### Updating and removing
 
@@ -248,7 +263,9 @@ takes flat x, y, z triples and returns a `Float32Array` of x, y, depth, flags pe
 `SCREEN_IN_FRONT` | `SCREEN_IN_VIEW`, exported from the package). Other events: `camera`,
 `view` (camera or canvas size changed, inside the animation frame: for positioning overlay DOM),
 `frameComplete`, `modelLoaded`, `modelUnloaded`, `loadProgress`, `pluginInstalled`,
-`pluginRemoved`, `contextMenu` (see [the built-in toolbar](#built-in-toolbar-and-model-tree)). `on()`
+`pluginRemoved`, `contextMenu` (see [the built-in toolbar](#built-in-toolbar-and-model-tree)),
+`visibility` (`{ cause: 'setVisible' | 'isolate' | 'showAll' }`, after any visibility change,
+including a model's `setVisible` / `isolate`; for UI that mirrors what is shown). `on()`
 returns an unsubscribe function.
 
 ### Camera
@@ -491,7 +508,11 @@ Each `Model` (see `src/loaders/types.ts`) has `stats`, `bounds`, a metadata `hie
 parents, and per-node properties through `hierarchy.properties(node, inherited)`),
 `getProperties(objectId)`, a searchable property index `properties` (see
 [Properties and search](#properties-and-search)), and `setVisible`, `isolate`, `fitToView`,
-`setTransform`, `unload`. From [models.ts](examples/models.ts):
+`setTransform`, `unload`. `model.visible` is the model-level show / hide state: false after
+`setVisible(false)`; true again after `setVisible(true)`, `isolate()`, `viewer.showAll()`, or a
+`viewer.isolate(ids)` / `viewer.setVisible(ids, true)` that includes any of its objects; false after
+a `viewer.isolate(ids, true)` that includes none. Hiding single objects and ghosting leave it alone.
+The `visibility` event fires after each change. From [models.ts](examples/models.ts):
 
 ```ts
     row.append(
@@ -914,6 +935,19 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 - Shift + click (or ctrl / cmd + click) on a node adds it to the selection, or removes it when it
   is already in; the camera then frames everything selected.
 - Selecting objects on the canvas highlights their nodes and reveals the first one in the open tree.
+- Each model row has an eye button on the right that shows / hides the whole model
+  (`model.setVisible`); hidden models' rows are dimmed. The eye follows `model.visible`, re-read on
+  the viewer's `visibility` event, so it stays in step with the Models panel, code, **Show all**
+  (which shows every model again) and isolation: `model.isolate()` and an isolate that includes any
+  of a model's objects show it; an isolate that hides the rest (`isolate(ids, true)`, **Hide
+  unselected**) closes the eye of every model without isolated objects; ghosting (`isolate(ids)`)
+  keeps eyes as they are. Hiding single objects (**Hide selected**) leaves the eye open.
+  A click on the eye only toggles visibility: it does not select, frame or expand. It is a
+  `<button>` with `aria-pressed` (true while shown) and the title Hide / Show, and stays usable while
+  the name filter is active.
+- `ui.hierarchy.addGroup(group)` adds a top-level group of your own nodes that belong to no model,
+  e.g. objects you draw yourself (see [Host groups in the model tree](#host-groups-in-the-model-tree)).
+  With `visible()` and `setVisible(on)` its header gets the same eye.
 - **Models** opens the models panel: open files (or drop them on the canvas), follow running loads
   with a cancel button, and show / hide, fit, isolate or unload each model. `ui.models.footer` is an
   empty container for your own content, and `ui.models.showError(text)` reports a failed load.
@@ -966,6 +1000,68 @@ ui.addButton({ label: 'Top', title: 'Top view', onClick: () => { /* your action 
 
 Rows are virtualised, so trees with hundreds of thousands of nodes stay responsive. The styles are
 injected under the `mkv-` class prefix; `ui.dispose()` removes everything.
+
+### Host groups in the model tree
+
+The tree can also show nodes the host provides: a group header (after the loaded models, also when
+no model is loaded) with your nodes below it, each with an optional coloured badge dot. The tree
+only draws them and reports clicks; it never changes the viewer's selection for them.
+
+```ts
+import type { VirtualTreeNode } from 'mk-viewer';
+
+const listeners = new Set<() => void>();
+const remove = ui.hierarchy.addGroup({
+  id: 'scaffolds',
+  label: 'Scaffolds',
+  icon: '▦',                  // optional short text before the label
+  order: 0,                   // groups sort by order; a negative order puts the group before the models
+  children: (): VirtualTreeNode[] => scaffolds.map((s) => ({
+    id: s.id,                 // unique in the group: expansion and highlight state follow the id
+    label: s.name,
+    children: s.floors.map((f) => ({
+      id: `${s.id}/${f.level}`,
+      label: `Floor ${f.level}`,
+      badge: { color: f.ok ? '#34a853' : '#ea4335', title: f.ok ? 'released' : 'blocked' },
+    })),
+  })),
+  onClick: (node, { additive }) => selectMyObjects(node.id, additive), // your selection, framing ...
+  onDoubleClick: (node) => frameMyObject(node.id),
+  onHeaderClick: () => {},
+  onChanged: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
+  // optional: an eye on the header (both functions, or neither)
+  visible: () => scaffoldsShown,
+  setVisible: (on) => showMyScaffolds(on),
+});
+// your data changed: call the listeners (or ui.hierarchy.refreshGroups('scaffolds'))
+listeners.forEach((l) => l());
+// mirror your selection in the tree; the first node is revealed (reveal: false to skip)
+ui.hierarchy.setGroupSelection('scaffolds', ['s1/2']);
+```
+
+- `children()` is read when the group is added and on every refresh: `refreshGroups(id?)`, or the
+  listener the tree passes to `onChanged`. Expanded nodes and highlighted nodes are kept by node id.
+- A click on a node calls `onClick(node, { additive, event })` (`additive`: Shift, Ctrl or Cmd was
+  held); a click on its caret only expands it. A click on the header expands / collapses the group
+  and then calls `onHeaderClick`. Callback errors are logged, not thrown.
+- With `visible()` and `setVisible(on)` the header gets an eye button (groups without them have
+  none). A click calls `setVisible(!visible())` and re-reads `visible()`; it never expands,
+  collapses or calls `onHeaderClick` / `onClick`. While `visible()` is false the header and its
+  nodes are dimmed. `visible()` is re-read whenever the group refreshes (`onChanged`,
+  `refreshGroups`) and on the viewer's `visibility` event, so a group that derives its state from
+  viewer visibility follows **Show all** by itself; anything else that changes it, signal through
+  `onChanged`. `ui.hierarchy.updateVisibility()` re-reads every eye. Errors in either callback are
+  logged; a throwing `visible()` counts as shown.
+- `setGroupSelection(groupId, nodeIds, { reveal })` highlights nodes like the nodes of a canvas
+  selection and, with the tree open, expands to and scrolls to the first; `[]` clears them.
+  `getGroupSelection(groupId)` reads them back and `revealGroupNode(groupId, nodeId)` only shows a
+  node. Model nodes and virtual nodes are highlighted independently: clear yours when the viewer's
+  selection takes over, if that is what you want.
+- The name filter covers the group's nodes, showing the matches with the path to them.
+- `addGroup` with an id already in use replaces that group in place. The function it returns (or
+  `removeGroup(id)`) removes the group and unsubscribes `onChanged`.
+- `examples/interaction.ts` lists the floors and tables of a building built from code this way,
+  with an eye that shows / hides the whole building.
 
 ## How it stays fast
 

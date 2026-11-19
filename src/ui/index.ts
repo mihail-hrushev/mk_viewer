@@ -11,4 +11,4 @@ export type { PanelOptions } from './Panel';
 export { ContextMenu } from './ContextMenu';
 export type { MenuItem } from './ContextMenu';
 export { TreeModel, MODEL_ROW } from './TreeModel';
-export type { TreeSource } from './TreeModel';
+export type { TreeSource, TreeBadge, TreeVisibility, VirtualTreeNode, VirtualTreeGroup, VirtualTreeClick } from './TreeModel';

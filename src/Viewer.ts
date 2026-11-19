@@ -21,7 +21,9 @@
  *   rate of rendered frames while the renderer is busy (the loop idles when the image is complete).
  * - Picking (`pick`, hover, click selection) reads the GPU id buffer of the image on screen, so it
  *   reflects what is drawn: while a heavy image is still being refined, small objects not drawn yet
- *   are not pickable.
+ *   are not pickable. Meshes added with `pickable: false` (or `setPickable(ids, false)`) and
+ *   ghosted meshes write no id, so every pick path (`pick`, `snap`, hover, click selection, the
+ *   context menu, the orbit pivot) ignores them.
  * - Models: `load()` runs a loader plugin (registered explicitly: `ViewerOptions.loaders`,
  *   `registerLoader`, or the shared `defaultRegistry`). Several loads may run concurrently; they share
  *   one round-robin time-slicing scheduler and appear progressively. Loaded models are listed in
@@ -90,6 +92,7 @@ import { defaultRegistry, LoaderRegistry } from './loaders/registry';
 import { DEFAULT_OBJECT_ID_BASE } from './loaders/objectIds';
 import { FRAG_TEX_WIDTH, FragFlags, MAX_SECTION_PLANES } from './layout';
 import { Scene } from './core';
+import { isObjectIdRange } from './core/Scene';
 import { GlContext, planeFromNormalPoint } from './gl';
 import { Camera, CameraTransition, OrbitControls, standardView } from './camera';
 import * as prim from './primitives';
@@ -217,6 +220,7 @@ export class Viewer implements ViewerApi {
     pluginInstalled: new Set(),
     pluginRemoved: new Set(),
     contextMenu: new Set(),
+    visibility: new Set(),
   };
   private lastCamera: CameraState | null = null;
   /** Camera (origin-relative) and canvas size at the last `view` event: eye, target, up, fov, ortho, w, h. */
@@ -456,6 +460,7 @@ export class Viewer implements ViewerApi {
     this.ensureOrigin(m, 0, g);
     foldTransform(m, 0, this.geomOff.subarray(g * 3, g * 3 + 3), this.origin, this.m64, 0);
     const id = this.scene.addMesh(this.geomCore[g], params.material, this.m64, params.objectId, params.batchGroup ?? 0);
+    if (params.pickable === false) this.scene.meshFlags(id, FragFlags.NotPickable, 0);
     this.setMeshGeom(id, 1, g);
     this.geomUses[g]++;
     this.renderer.noteAppend();
@@ -498,6 +503,7 @@ export class Viewer implements ViewerApi {
       if (first < 0) first = f;
     }
     this.setMeshGeom(first, n, g);
+    if (params.pickable === false) for (let i = 0; i < n; i++) sc.meshFlags(first + i, FragFlags.NotPickable, 0);
     this.geomUses[g] += n;
     this.renderer.noteAppend();
     return first;
@@ -634,12 +640,54 @@ export class Viewer implements ViewerApi {
     this.scene.setVisible(objectIds, visible);
     this.ghostDirty = true;
     this.renderer.invalidateImage();
+    // a hidden model with an object shown again counts as shown (hiding objects never hides a model)
+    if (visible) this.syncModelVisibility(objectIds, false);
+    this.emit('visibility', { cause: 'setVisible' });
+  }
+
+  setPickable(objectIds: ObjectSelection, pickable: boolean): void {
+    this.scene.setPickable(objectIds, pickable);
+    this.renderer.invalidateImage(); // the id buffer is part of the image
   }
 
   isolate(objectIds: ObjectSelection | null, hideOthers = false): void {
     this.scene.isolate(objectIds, hideOthers);
     this.ghostDirty = true;
     this.renderer.invalidateImage();
+    if (objectIds === null) for (const m of this.loaded) m.markVisible(true);
+    else this.syncModelVisibility(objectIds, hideOthers);
+    this.emit('visibility', { cause: 'isolate' });
+  }
+
+  /**
+   * Keeps `model.visible` in step with object-level calls: models with any of `objectIds` are
+   * shown; with `hideOthers` (isolate hiding the rest) models with none of them are hidden.
+   */
+  private syncModelVisibility(objectIds: ObjectSelection, hideOthers: boolean): void {
+    // models whose flag can change: hidden ones, and with hideOthers every model with objects
+    const want = new Set<ModelImpl>();
+    for (const m of this.loaded) if (m.stats.objects > 0 && (hideOthers || !m.visible)) want.add(m);
+    if (want.size === 0) return;
+    const touched = new Set<ModelImpl>();
+    const hit = (m: ModelImpl | undefined): boolean => {
+      if (m && want.has(m)) touched.add(m);
+      return touched.size === want.size;
+    };
+    if (typeof objectIds === 'number') hit(this.getModelOf(objectIds) as ModelImpl | undefined);
+    else if (isObjectIdRange(objectIds)) {
+      if (this.runsDirty) this.rebuildRuns();
+      const first = objectIds.first;
+      const end = first + objectIds.count;
+      for (let r = 0; r < this.runStart.length; r++) {
+        if (this.runStart[r] < end && this.runEnd[r] > first && hit(this.runModel[r])) break;
+      }
+    } else {
+      for (let i = 0; i < objectIds.length; i++) if (hit(this.getModelOf(objectIds[i]) as ModelImpl | undefined)) break;
+    }
+    for (const m of want) {
+      if (touched.has(m)) m.markVisible(true);
+      else if (hideOthers) m.markVisible(false);
+    }
   }
 
   setColor(objectIds: ObjectSelection, color: Color | null): void {
@@ -685,6 +733,8 @@ export class Viewer implements ViewerApi {
     this.scene.showAll();
     this.ghostDirty = true;
     this.renderer.invalidateImage();
+    for (const m of this.loaded) m.markVisible(true);
+    this.emit('visibility', { cause: 'showAll' });
   }
 
   // ---------------------------------------------------------------------------------------------
